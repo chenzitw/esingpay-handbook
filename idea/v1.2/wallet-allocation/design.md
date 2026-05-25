@@ -2,6 +2,7 @@
 status: draft
 updated_at: 2026-04-28
 updated_by: Tim
+remark: 本文件未依照 design 規範撰寫，暫供內容參考，等待後續重構改寫。
 ---
 
 # Wallet Allocation Design
