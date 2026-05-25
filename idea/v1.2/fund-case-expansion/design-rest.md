@@ -1,10 +1,15 @@
-# Fund Case Expansion REST Contract Design
+---
+status: drafts
+updated_at: 2026-05-13
+updated_by: Tim
+remark: 本文件未依照 design 規範撰寫，暫供內容參考，等待後續重構改寫。
+---
 
-version: 2026-05-13
+# Fund Case Expansion REST Contract Design
 
 ## Scope
 
-本 spec 範圍：對應 `fund-case-expansion-design-draft.md` 落地的 REST contract 表面——request / response DTO 形狀、endpoint URL、error code surface。前端可以以此 spec 作為對齊 target，與後端實作平行進行。
+本 spec 範圍：對應 `./design.md` 落地的 REST contract 表面——request / response DTO 形狀、endpoint URL、error code surface。前端可以以此 spec 作為對齊 target，與後端實作平行進行。
 
 涵蓋：
 
@@ -15,7 +20,7 @@ version: 2026-05-13
 
 不涵蓋：
 
-- Domain 層細節（raw / entity / 狀態機）——見 `fund-case-expansion-design-draft.md`
+- Domain 層細節（raw / entity / 狀態機）——見 `./designs.md`
 - Wallet RPC contract——本期不動
 - Implementation 細節（controller / mapper / module wiring）——見對應 impl plan
 
