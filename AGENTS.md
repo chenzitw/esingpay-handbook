@@ -47,17 +47,17 @@ Mirror baseline is engineering leverage, not spec authority.
 
 ## Where to look
 
-| Need                                               | Location                         |
-| -------------------------------------------------- | -------------------------------- |
-| Workflow framework (PSDD overview)                 | `convention/workflow.md`         |
-| Writing a proposal / design / blueprint / plan     | `convention/workflow-<tier>.md`  |
-| Version cycle / closing / hygiene / distillation   | `convention/workflow-closing.md` |
-| Version status across versions                     | `VERSIONS.md`                    |
-| Current version scope / backlog / spec persistence | `idea/vX.Y/README.md`            |
-| Specific feature within a version                  | `idea/vX.Y/<topic>-*.md`         |
-| Settled, cross-version architectural specs         | `spec/`                          |
-| Codebase architecture rules                        | `<codebase>/guide/`              |
-| Codebase-specific agent setup                      | `<codebase>/AGENTS.md`           |
+| Need                                               | Location                                           |
+| -------------------------------------------------- | -------------------------------------------------- |
+| Workflow framework (PSDD overview)                 | `convention/workflow.md`                           |
+| Writing a proposal / design / blueprint / plan     | `convention/workflow-<tier>.md`                    |
+| Version cycle / closing / hygiene / distillation   | `convention/workflow-closing.md`                   |
+| Version status across versions                     | `VERSIONS.md`                                      |
+| Current version scope / backlog / spec persistence | `idea/vX.Y/README.md`                              |
+| Specific feature within a version                  | `idea/vX.Y/<topic>-*.md`, `idea/vX.Y/<topic>/*.md` |
+| Settled, cross-version architectural specs         | `spec/`                                            |
+| Codebase architecture rules                        | `<codebase>/guide/`                                |
+| Codebase-specific agent setup                      | `<codebase>/AGENTS.md`                             |
 
 Consult this table before exhaustive search. The handbook is designed for minimal-read navigation.
 

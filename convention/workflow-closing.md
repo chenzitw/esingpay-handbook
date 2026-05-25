@@ -24,15 +24,16 @@ Closing 與前面四個 tier 的形狀不同——它不是「撰寫一份文件
 
 ## 版本生命周期
 
-每個 vX.Y 有三個狀態：
+每個 vX.Y 有四個狀態：
 
-| 狀態          | 意義                              | 進入條件                                          |
-| ------------- | --------------------------------- | ------------------------------------------------- |
-| **in flight** | 開發活躍中                        | 版本啟動時                                        |
-| **completed** | Implementation 完成、hygiene 尚未 | 主要 feature 都 merge、進入收尾階段               |
-| **closed**    | Hygiene 也都做完                  | 該版本 README 的 backlog 與 spec persistence 歸零 |
+| 狀態        | 意義                                  | 進入條件                                          |
+| ----------- | ------------------------------------- | ------------------------------------------------- |
+| **pending** | 規劃中、尚未啟動開發                  | 版本被建立但尚未開工                              |
+| **active**  | 開發活躍中                            | 開始為該版本撰寫文件或動 code                     |
+| **closing** | Implementation 完成、hygiene 進行中   | 主要 feature 都 merge、進入收尾階段               |
+| **closed**  | Hygiene 與 spec distillation 也都做完 | 該版本 README 的 backlog 與 spec persistence 歸零 |
 
-狀態追蹤在 handbook root 的 `VERSIONS.md`。轉換是手動的，cadence informal——通常由 Tim 主導，不嚴格綁特定時間點。
+狀態追蹤在 handbook root 的 `VERSIONS.md`。轉換是手動的，cadence informal、不嚴格綁特定時間點。
 
 **新版本開啟的觸發**：累積足夠新 feature scope、或對齊 system development milestone。沒有固定週期。
 
@@ -42,7 +43,7 @@ Closing 與前面四個 tier 的形狀不同——它不是「撰寫一份文件
 
 - **Scope**：本版本要處理的 feature 清單。
 - **Backlog**：開發過程浮出、未在本版本解決的項目，含狀態（`open` / `cancelled` / `merged into vN.M` / `done`）。
-- **Spec persistence**：本版本完成後該蒸餾進 `spec/` / `guide/` 的內容，含狀態（`pending` / `done`）。
+- **Spec persistence**：本版本完成後該蒸餾進 `spec/` / `guide/` 的內容，含狀態（`todo` / `done`）。
 
 Per-version README 是 closing 的主要工作介面——hygiene 與 distillation 都靠它列出待處理事項。
 
@@ -83,11 +84,12 @@ Handbook root 的 `VERSIONS.md` 是跨版本狀態總覽：
 ```markdown
 # Versions
 
-| Version | Status    | Notes      |
-| ------- | --------- | ---------- |
-| v1.0    | closed    | ...        |
-| v2.0    | completed | hygiene 中 |
-| v3.0    | in flight | ...        |
+| Version | Status  | Notes      |
+| ------- | ------- | ---------- |
+| v1.0    | closed  | ...        |
+| v1.2    | closing | hygiene 中 |
+| v2.0    | active  | ...        |
+| v2.1    | pending | ...        |
 ```
 
 Status flip 由負責人手動更新。VERSIONS.md **不重複** per-version README 的細節——它只回答「哪個版本到哪個 milestone」。
@@ -96,13 +98,14 @@ Status flip 由負責人手動更新。VERSIONS.md **不重複** per-version REA
 
 ## Hygiene flow
 
-當版本進入 `completed` 但 README 還有 open backlog 或 pending spec persistence 時，需要做 hygiene round。
+當版本進入 `closing` 但 README 還有 open backlog 或 todo spec persistence 時，需要做 hygiene round。
 
 **步驟**：
 
 1. 走過 README 的 **Backlog**：每項做 close / cancel / merge into 下個版本之一
-2. 走過 README 的 **Spec persistence**：每項蒸餾進對應 `spec/*.md` 或 `guide/*.md`、標記 done
-3. 兩表都歸零 → flip VERSIONS.md 該版本為 `closed`
+2. **Adjacent Doc Drift sweep**：走過本版本所有 landed plan 的 `Adjacent Doc Drift` 段，每項做 **resolve（sync 文件）** 或 **ratify（接受為長期 divergence，寫進 spec / guide）**。Drift 不處理會讓 handbook 隨時間失準。
+3. 走過 README 的 **Spec persistence**：每項蒸餾進對應 `spec/*.md` 或 `guide/*.md`、標記 done
+4. 三表都歸零 → flip VERSIONS.md 該版本為 `closed`
 
 **觸發時機**：通常是「要開新版本前」或「backlog 多到難管」。Cadence informal、不必排程。
 
@@ -121,6 +124,8 @@ Distillation 把 `idea/vX.Y/` 內已穩定的內容往兩個方向蒸餾：
 
 - **架構性、跨版本仍會被引用的決策** → handbook 的 `spec/`
 - **codebase 寫作 pattern、coding rules** → 該 codebase 的 `guide/`
+
+**蒸餾的主要來源**：plan 內的 `Frozen Decisions` 是首要候選——通用 pattern 蒸餾進 `guide/` 或 `spec/`；feature-tactical 的決議留原檔當歷史。Design / blueprint 內的結構決策、被驗證 work 的 cross-plan 共用詞彙也是候選。
 
 **蒸餾不等於搬移**——`idea/vX.Y/` 內檔案永不搬走、永遠留在原版本作為歷史記錄。Distillation 是把「資訊精華」濃縮到 spec / guide 作為當前 source of truth。
 

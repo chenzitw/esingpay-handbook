@@ -47,7 +47,7 @@ Proposal 通過後的下游不固定：
 
 Design 回答「**做什麼**」——範圍、新增或變動的領域實體、它們的行為與關係、明確排除的、為何選此路。Design 必寫；每個 feature、refactor、infra 引入都從 design 起點。
 
-建議 AI 共筆環境：**web**。Design 是抽象框定，不該從讀 code 中反推發現。
+建議 AI 共筆環境：**web**。Design 是抽象框定，不從 code 反推產生；若需驗證假設或了解既有狀態，可請 CLI 端做 codebase survey 取得事實。
 
 詳見 `workflow-design.md`。
 
@@ -57,7 +57,7 @@ Blueprint 回答「**怎麼推**」——把 design 切階段、定關鍵結構�
 
 Blueprint **可選**：當 implementation 從 design 已可直接推導，寫 blueprint 反而是 over-engineering。
 
-建議 AI 共筆環境：**web**。Blueprint 仍屬策略思考，不需 codebase 落地驗證。
+建議 AI 共筆環境：**web**。Blueprint 仍屬策略思考，不需直接 codebase 存取；若需查驗既有 schema、pattern、infra 假設，可請 CLI 端做 codebase survey。
 
 詳見 `workflow-blueprint.md`。
 
@@ -108,6 +108,37 @@ wallet-allocation-plan-stage-1-phase-1.md
 wallet-allocation-plan-stage-1-phase-2.md
 ```
 
+### Topic folder（optional）
+
+當 topic 內 artifact 數量增多時，可改用 folder 組織。Folder 路徑形式：
+
+```
+idea/<version>/<topic>/        # handbook 側
+plan/<version>/<topic>/        # codebase 側（plans）
+```
+
+**何時用 folder**（任一觸發即可）：
+
+- Topic 有 3+ 個檔案
+- Topic 有 extension docs（見下）
+- Topic 有 multi-stage 或 multi-phase plans
+
+Folder 與 flat 在同一 topic 內保持一致——選定後不混用。
+
+**Folder 內命名**（`<topic>-` 前綴已由路徑表達、檔內不重述）：
+
+| Flat                              | Folder 內                 |
+| --------------------------------- | ------------------------- |
+| `<topic>-proposal.md`             | `proposal.md`             |
+| `<topic>-design.md`               | `design.md`               |
+| `<topic>-blueprint.md`            | `blueprint.md`            |
+| `<topic>-blueprint-stage-N.md`    | `blueprint-stage-N.md`    |
+| `<topic>-plan-stage-N-phase-M.md` | `plan-stage-N-phase-M.md` |
+
+**Extension docs**：tier 主檔之外的延伸補充，可視情況撰寫；命名以 tier 名為前綴——`design-xxx.md` / `blueprint-xxx.md` / `plan-xxx.md`（例：`design-api-draft.md`）。
+
+**Codebase survey 不 commit**：survey 是討論過程的暫存資料，內容常很長且容易 outdated。Survey 結果作為 design / blueprint 的 input、不 commit 進 handbook——只 commit 蒸餾後的正式 artifact。
+
 ## Repo split
 
 兩個 repo 配合：
@@ -128,7 +159,7 @@ wallet-allocation-plan-stage-1-phase-2.md
   <handbook>/
 ```
 
-Plan 以相對路徑引用 design / blueprint（如 `../<handbook>/idea/v2.0/<topic>/design.md`）。CLI agent 在 codebase 工作時以 `--add-dir <handbook>` 帶入 handbook。
+Plan 以相對路徑引用 design / blueprint（如 `../<handbook>/idea/v2.0/<topic>-design.md`）。CLI agent 在 codebase 工作時以 `--add-dir <handbook>` 帶入 handbook。
 
 ## Trajectory
 
