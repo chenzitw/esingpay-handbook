@@ -15,6 +15,7 @@
 
 ## 版本
 
-| Version | Status | Notes |
-| ------- | ------ | ----- |
-|         |        |       |
+| Version                     | Status | Notes                                  |
+| --------------------------- | ------ | -------------------------------------- |
+| [v1.0](idea/v1.0/README.md) | closed | PSDD 導入、初始 convention 與 workflow |
+| [v1.2](idea/v1.2/README.md) | active | 新版金流帳務系統基本功能               |
