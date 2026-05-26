@@ -67,11 +67,9 @@
 
 | Key | Type | 代表意義 |
 | --- | --- | --- |
-| `type` | `'principal' \| 'network_fee' \| 'service_fee' \| 'adjustment'` | 此交易造成的資產流動類型。 |
-| `currencyCode` | `string` | 此 effect 對應的資產代碼。 |
-| `rail` | `string \| null` | 此 effect 對應的 rail。 |
-| `network` | `string \| null` | 此 effect 對應的 network。 |
-| `amount` | `NumericString` | 此 effect 的金額。 |
+| `type` | `'principal' \| 'network_fee'` | 此交易造成的資產流動類型。 |
+| `network` | `string \| null` | 此 legs 對應的 network。 |
+| `amount` | `NumericString` | 此 legs 的金額。 |
 
 
 ## ExternalWithdrawalDestinationDto
