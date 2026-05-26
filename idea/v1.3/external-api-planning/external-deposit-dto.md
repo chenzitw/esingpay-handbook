@@ -66,7 +66,7 @@
 
 | Key | Type | 代表意義 |
 | --- | --- | --- |
-| `type` | `'principal' \| 'network_fee' \| 'service_fee' \| 'adjustment'` | 此交易造成的資產流動類型。 |
+| `type` | `'principal' \| 'network_fee'` | 此交易造成的資產流動類型。 |
 | `currencyCode` | `string` | 此 legs 對應的資產代碼。 |
 | `amount` | `NumericString` | 此 legs 的金額。 |
 
@@ -78,7 +78,7 @@
 | --- | --- | --- |
 | `type` | `string` | 金流來源類型，例如 `crypto`、`bank`。 |
 | `rail` | `string` | 金流來源管道，例如 `tron`、`solana`。 |
-| `identifier` | `string` | 來源識別值，例如鏈上 from address、bank account reference、payer reference 或 provider reference。 |
+| `identifier` | `string` | 來源識別值，例如鏈上 from address、bank account。 |
 
 ## DepositStatus
 
