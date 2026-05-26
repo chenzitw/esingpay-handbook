@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | `id` | `string` | Deposit 業務單 ID，也就是這筆入金紀錄的識別碼。 |
 | `wallet` | `WalletDto` | 入金接收 wallet 的 external 摘要。 |
-| `transaction` | `DepositTransactionDto` | 本筆 deposit 使用的 payment rail / network / transaction 摘要。 |
+| `transaction` | `DepositTransactionDto` | 本筆 deposit 使用的 payment / network / transaction 摘要。 |
 | `source` | `ExternalDepositSourceDto` | 入金來源。這是外部付款方，只保留觀測到的基本資訊。 |
 | `status` | `DepositStatus` | 對外 Deposit 狀態。 |
 | `currencyCode` | `CurrencyCode` | 出金資產幣別，例如 `USDT`、`TRX`。 |  |
@@ -37,7 +37,7 @@
 | Key | Type | 代表意義 |
 | --- | --- | --- |
 | `type` | `'blockchain' \| 'bank'` | Payment rail 類型。 |
-| `provider` | `string` | Rail provider，例如 `tron`、`solana`、`swift`、`stripe`。 |
+| `provider` | `string` | Network provider，例如 `tron`、`solana`、`swift`、`stripe`。 |
 | `blockchain` | `TransactionBlockchainDetailDto \| null` | Blockchain-specific transaction detail。 |
 | `bank` | `TransactionBankDetailDto \| null` | Bank-specific transfer detail。 |
 | `legs` | `ExternalLegsDto[]` | 此交易實際造成的資產流動明細，例如 principal、network fee。 |
@@ -56,7 +56,7 @@
 
 | Key | Type | 代表意義 |
 | --- | --- | --- |
-| `rail` | `string` | Bank transfer rail，例如 `swift`、`ach`、`sepa`。 |
+| `network` | `string` | Bank transfer rail，例如 `swift`、`ach`、`sepa`。 |
 | `providerReferenceId` | `string \| null` | Provider reference id。 |
 | `bankReferenceId` | `string \| null` | Bank-side reference id。 |
 | `senderBankCode` | `string \| null` | Sender bank code。 |
@@ -67,10 +67,8 @@
 | Key | Type | 代表意義 |
 | --- | --- | --- |
 | `type` | `'principal' \| 'network_fee' \| 'service_fee' \| 'adjustment'` | 此交易造成的資產流動類型。 |
-| `currencyCode` | `string` | 此 effect 對應的資產代碼。 |
-| `rail` | `string \| null` | 此 effect 對應的 rail。 |
-| `network` | `string \| null` | 此 effect 對應的 network。 |
-| `amount` | `NumericString` | 此 effect 的金額。 |
+| `currencyCode` | `string` | 此 legs 對應的資產代碼。 |
+| `amount` | `NumericString` | 此 legs 的金額。 |
 
 ## ExternalDepositSourceDto
 
