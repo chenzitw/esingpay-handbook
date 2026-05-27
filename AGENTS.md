@@ -1,6 +1,26 @@
 # Agents
 
-Read this file first when working on this handbook. It captures the working norms and navigation map every AI agent needs before producing output.
+Read this file first when working on this handbook. It captures the repo orientation, working norms, and navigation map every AI agent needs before producing output.
+
+## Repo orientation
+
+You are reading the AGENTS.md of `esingpay-handbook`. This repo holds concept-layer documents — proposals, designs, blueprints, specs, and workflow conventions.
+
+The sibling is `<codebase>` — one or more codebase repos holding production code, engineering rules (`guide/`), and implementation plans (`plan/`). Cardinality is one-to-many (e.g., backend + frontend), so do not assume a single default; identify the relevant codebase from the current task context.
+
+### Access models
+
+How you reach `<codebase>` content depends on how this AGENTS.md reached you.
+
+| Access model     | How sibling content reaches you                              | Resolving `<codebase>/...` references              |
+| ---------------- | ------------------------------------------------------------ | -------------------------------------------------- |
+| Filesystem (CLI) | sibling repo must be mounted in the working set              | resolve as literal relative path                   |
+| Knowledge corpus | sibling content may be present in the same searchable corpus | resolve via content search, not path               |
+| Connector        | typically scoped to one repo only                            | sibling may be unreachable; declare the limitation |
+
+### Fallback when sibling is unreachable
+
+If a task requires sibling content that you cannot reach, do not silently proceed. Alert the user with the missing path or repo name and pause for instructions.
 
 ## Working norms
 
@@ -47,6 +67,8 @@ Mirror baseline is engineering leverage, not spec authority.
 
 ## Where to look
 
+Navigation within this handbook.
+
 | Need                                               | Location                                           |
 | -------------------------------------------------- | -------------------------------------------------- |
 | Workflow framework (PSDD overview)                 | `convention/workflow.md`                           |
@@ -56,15 +78,13 @@ Mirror baseline is engineering leverage, not spec authority.
 | Current version scope / backlog / spec persistence | `idea/vX.Y/README.md`                              |
 | Specific feature within a version                  | `idea/vX.Y/<topic>-*.md`, `idea/vX.Y/<topic>/*.md` |
 | Settled, cross-version architectural specs         | `spec/`                                            |
-| Codebase architecture rules                        | `<codebase>/guide/`                                |
-| Codebase-specific agent setup                      | `<codebase>/AGENTS.md`                             |
 
 Consult this table before exhaustive search. The handbook is designed for minimal-read navigation.
 
 ## Reading discipline
 
 - For workflow questions, go to `convention/` first.
-- For codebase facts (existing schema, file paths, patterns), request a survey from a CLI-side agent rather than guessing.
+- For codebase grounding during design or blueprint work — engineering rules in `<codebase>/guide/`, existing schemas, file paths, patterns, or landed plans in `<codebase>/plan/` — default to requesting a survey from a CLI-side agent rather than guessing. When multiple codebases exist (e.g., backend + frontend), pick the relevant one from task context. Per-tier survey conventions live in `convention/workflow-<tier>.md`.
 - When a project convention is unfamiliar, read the relevant `convention/*.md` before producing output.
 
 ## Maintenance
