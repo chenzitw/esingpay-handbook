@@ -89,4 +89,4 @@ Consult this table before exhaustive search. The handbook is designed for minima
 
 ## Maintenance
 
-Codex maintains the "Where to look" table. Other agents may flag entries needing updates but should not rewrite it directly. The rest of this file is updated as collaboration norms evolve; propose changes explicitly rather than editing inline.
+This file is updated as collaboration norms evolve; propose changes explicitly rather than editing inline.
