@@ -19,7 +19,7 @@ remark: 本文件未依照 design 規範撰寫，暫供內容參考，等待後�
 不在本 spec 範圍：
 
 - Implementation phasing / migration ordering（留 impl plan）
-- Cross-cutting `feePayerWalletId` 欄位的持久化改造（先於本 spec 主線，排在 impl ep-1 plan-1 第一部分）
+- Cross-cutting `feePayerWalletId` 欄位的持久化改造（先於本 spec 主線，排在 Stage 1 Phase 1 (legacy ep-1 plan-1) 第一部分）
 - Wallet-side 改動——零改動。`WalletAllocationType.Transfer` 已存在；`WalletAllocationLine` 的 `Internal | External` discriminated union 已 accommodate transfer 場景
 - Ledger / cashflow read model 調整——既有 `wallet-allocation-design` 已涵蓋
 - 批次 UI 的後台對帳 / 顯示分組——批次不入 domain，無 `batchCorrelationId` 持久化
@@ -480,7 +480,7 @@ PM UI 的批次操作（如「選 N 個 platform treasury 各送 amount 到 1 �
    Mirror 對稱保留，目前無 use-case caller。整體 fund case dead method cleanup 時可一併考慮。
 
 4. **`feePayerWalletId` 持久化跨 fund case 改造**
-   本 spec 假設 `feePayerWalletId` 欄位已存在於 TransferIntent 與 WithdrawalIntent。實際落地排程為 impl ep-1 plan-1 第一部分（cross-cutting，先於 transfer 主線實作）。
+   本 spec 假設 `feePayerWalletId` 欄位已存在於 TransferIntent 與 WithdrawalIntent。實際落地排程為 Stage 1 Phase 1 (legacy ep-1 plan-1) 第一部分（cross-cutting，先於 transfer 主線實作）。
 
 5. **`NetworkEndpoint → (networkType, networkProvider)` derivation path**
    Same-network invariant 的 derivation 實作待 Codex 依 `NetworkEndpoint` 內部結構承接。本 spec 不規約 derivation 程式表面。
@@ -492,7 +492,7 @@ PM UI 的批次操作（如「選 N 個 platform treasury 各送 amount 到 1 �
    - REST lifecycle endpoints（`cancelTransferIntentById` / `rejectTransferIntentById` / `releaseTransferIntentById`）
    - 重新評估 `TransferIntentAutoProgressService` 政策表（依 category + 金額 + 政策做條件判斷）
 
-   此項與 `fund-case-expansion-rest-contract-spec.md` Open Points 第 7 條對應。
+   此項與 `design-rest.md` Open Points 第 7 條對應。
 
 ---
 

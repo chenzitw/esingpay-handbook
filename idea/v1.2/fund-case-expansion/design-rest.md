@@ -20,7 +20,7 @@ remark: 本文件未依照 design 規範撰寫，暫供內容參考，等待後�
 
 不涵蓋：
 
-- Domain 層細節（raw / entity / 狀態機）——見 `./designs.md`
+- Domain 層細節（raw / entity / 狀態機）——見 `./design.md`
 - Wallet RPC contract——本期不動
 - Implementation 細節（controller / mapper / module wiring）——見對應 impl plan
 
@@ -178,7 +178,7 @@ export enum WithdrawalIntentCategory {
 
 ### `WithdrawalIntentDto` 更新
 
-新增兩個欄位：`category`（mandatory）與 `feePayerWallet`（mandatory，承 impl ep-1 plan-1 first part 的 feePayer 持久化）：
+新增兩個欄位：`category`（mandatory）與 `feePayerWallet`（mandatory，承 Stage 1 Phase 1 (legacy ep-1 plan-1) first part 的 feePayer 持久化）：
 
 ```ts
 export type WithdrawalIntentDto = {
