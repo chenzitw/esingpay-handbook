@@ -13,6 +13,7 @@ remark: 本文件未依照 blueprint 規範撰寫，暫供內容參考，等待�
 
 - WithdrawalIntent 擴展（category 引入、platform sender 支援、gather batch、destination_internal 偵測）
 - TransferIntent 新建（全新 fund case，含 fast-forward 政策、gather/distribute batch、ledger projection 整合、instruct flow）
+- TransferIntent platform endpoint 的 API gateway expose（cross-BC，Stage 2 Phase 9）
 
 不涵蓋：
 
@@ -240,6 +241,43 @@ Staging 上線節奏：依 stage 整波上 staging。
 - 規模小（mirror 既有 `isWithdrawalSufficient`、單一 method）；預期 1 phase 落地
 - contract-rpc + wallet cradle server controller + balance query 同 phase 完成
 
+#### Stage 2 Phase 9: Gateway REST Expose（platform）
+
+**範圍**：
+
+- 於 API gateway 對齊 `platTransferIntentApi` 的 **6 個 platform endpoint**——`submitTransferIntent` / `quoteTransferIntent` / `searchTransferIntents` / `getTransferIntentById` / `submitTransferIntentGatherBatch` / `submitTransferIntentDistributeBatch`
+- gateway 端新建：`PlatTransferIntentProxy`（包 `platTransferIntentApi` 6 method 的 rest-rpc 轉發）、`PlatTransferIntentController`（HTTP route → proxy，含 permission decorator）、對應 request body / query DTO
+- `FundRestModule` wiring 擴張（註冊新 proxy + controller）
+- 全部 mirror gateway 既有 `PlatWithdrawalIntentProxy` / `PlatWithdrawalIntentController` pattern，純機械對位、薄轉發層、不引入新 precedent
+
+**不涵蓋**：
+
+- merchant 端 gateway expose——呼應 `./design-rest.md` Open Point 4「Merchant API 對 transfer 開放與否目前不開放」；本期 transfer 不對 merchant API 開放主動發起，gateway 亦不需 merchant transfer proxy
+- `cancelTransferIntentById` / `rejectTransferIntentById` / `releaseTransferIntentById`——cradle 端本就未實作（Stage 2 Phase 1 entity action methods 明確排除 cancel / reject / release），故 gateway 不對齊此三 endpoint（`./design-rest.md` Endpoint summary 雖列出，屬未來範疇）
+
+**Cross-BC 性質**：本 phase 工作項落於 **api-gateway bounded context**（`apps/esing-pay-api-gateway/src/rest/fund/...`），非 fund / transfer-intent cradle feature；與 Stage 2 Phase 8（wallet bounded context）並列為 cross-BC tracker，收於 fund Stage 2 blueprint 編號內、作為 transfer-intent 對外可用的最後一塊。
+
+**依賴**：Stage 2 Phase 3（submit / quote contract 定型）+ Phase 4（search / getById）+ Phase 5（gather / distribute batch）。gateway proxy 依賴全部 6 個 contract endpoint 皆已定型，結構上必落於所有 contract phase 之後——非並行 phase。
+
+**Phase 切分方向**（具體留 plan 起草階段）：
+
+- 規模小（mirror 既有 gateway withdrawal proxy / controller、薄轉發層）；預期 1 phase 落地
+- proxy + controller + request DTO + module wiring 同 phase 完成
+
+---
+
+## Delivery Conventions
+
+下列交付慣例為跨 phase 通則，使既有產物（smoke test 等）的「因」可溯，避免後續誤判為遺漏：
+
+### Smoke test 隨 feature inline 交付
+
+每個 cradle fund case feature 落地時，submit-path happy 的 smoke test **隨該 feature 的 submit / wiring phase inline 交付，不另立 phase**。Smoke test 附著於 submit/wiring phase（具備 submit 寫入路徑後即可驗證 happy path），不具獨立 phase 的並行/依賴邊界性質，故不在 stage/phase inventory 中單列編號。
+
+- TransferIntent 對應 **Stage 2 Phase 3**（Submit/Quote wiring），覆蓋已實作 category 的 submit-path happy path（`platform_to_platform`、`merchant_to_platform`）
+- WithdrawalIntent 對應 Stage 1 Phase 3（platform submit path）同理
+- gateway 薄轉發層（Stage 2 Phase 9）依既有 gateway 慣例不配 cradle 式 submit-path smoke
+
 ---
 
 ## Dependency Graph
@@ -251,13 +289,14 @@ Stage 1:
 
 Stage 2:
   Phase 1 ─┬─→ Phase 2 ─┐
-          │           ├─→ Phase 3 ─┬─→ Phase 4
-          │   Phase 8 ─┘           ├─→ Phase 5
-          │                       └─→ Phase 7
-          └─→ Phase 6
+          │           ├─→ Phase 3 ─┬─→ Phase 4 ─┐
+          │   Phase 8 ─┘           ├─→ Phase 5 ─┼─→ Phase 9
+          │                       └─→ Phase 7   │
+          └─→ Phase 6                           （Phase 9 依賴 Phase 3 + 4 + 5）
 
 Stage 1 與 Stage 2 之間：無 cross-stage dependency，完全並行
 Stage 2 Phase 8 為 cross-BC（wallet bounded context）；與 Phase 1 / Phase 2 / Phase 6 全部解耦，從 Stage 2 起點即可並行起作；為 Phase 3 hard prerequisite
+Stage 2 Phase 9 為 cross-BC（api-gateway bounded context）；依賴 Phase 3 + 4 + 5 全部 landed（6 endpoint contract 全定型），結構上落於所有 contract phase 之後，非並行 phase
 ```
 
 ---
@@ -283,6 +322,7 @@ Stage 2：
 - Phase 8 為 cross-BC、與 Phase 1 / Phase 2 / Phase 6 全部解耦，可從 Stage 2 起點即並行起作
 - Phase 2 完成**且** Phase 8 已 landed → Phase 3 起作
 - Phase 3 完成後，Phase 4、Phase 5 與 Phase 7 可並行起作
+- Phase 9 為 cross-BC（api-gateway）、非並行：依賴 Phase 3 + 4 + 5 全部 landed（6 endpoint contract 全定型），落於所有 contract phase 之後
 
 ### Claude Code 任務分配候選
 
@@ -322,6 +362,7 @@ Stage 2：
 
 - Wallet allocation 對 transfer 的 path 涵蓋設計（屬 wallet-allocation Stage 2 範疇）
 - Cashflow projection
-- Merchant API 對 transfer 開放（`./design-rest.md` Open Point 4）
+- Merchant API 對 transfer 開放（`./design-rest.md` Open Point 4）——含 merchant 端 gateway expose
+- TransferIntent `cancel` / `reject` / `release` endpoint 的 gateway expose（cradle 端 Stage 2 Phase 1 已排除此三 entity action，gateway 亦不對齊）
 - Batch quote endpoint（`./design-rest.md` Open Point 2）
 - 跨 fund case 共用 instruction dispatcher abstract interface（封裝 stays per-fund-case，命名對稱、結構同形、不共用程式碼）

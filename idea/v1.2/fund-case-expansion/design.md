@@ -219,30 +219,46 @@ const submittedTransitionPath: TransferIntentStatus[] = [
 `submittedTransitionPath` 為 submit 一次性快進路徑（mirror Deposit `recognizedTransitionPath`）。Submit 階段 entity 行為分兩步：
 
 1. **Entity factory `createSubmitted(...)`** 建立 draft，status = `preparing`、statusHistory 含 1 筆 `preparing` 紀錄（actor 為 submitter）。Factory 僅執行 structural invariant 校驗，**不**執行 fast-forward。
-2. **`TransferIntentAutoProgressService.progress(...)`**（同步、in-memory）依 `submittedTransitionPath` 對 entity 依序呼叫 `transitionTo(...)`，append 三筆 system actor statusHistory，最後設 `processedAt = submittedAt`。
+2. **`TransferIntentAutoProgressService.progressInTx({ transferIntent, occurredAt }, tx)`** 於 tx 2 內呼叫 entity public method `fastForwardToProcessed({ occurredAt, actor: systemActor })`，由 entity 內部依 `submittedTransitionPath` 完成三段 transition（含 append 三筆 system actor statusHistory）並設 `processedAt = occurredAt`、隨即透過 `replaceInTx` 持久化為 `processed` row。Service 內含 `fromRaw + fastForwardToProcessed + replaceInTx` 完整 progression cycle、**不**含 instruction dispatch（caller use case 顯式 own）。
 
-Submit use case orchestration 為：`createSubmitted(...)` → `autoProgressService.progress(...)` → persist。Service 公開 surface 為單一同步方法，不持久化、不發 RPC。
+Submit use case 採**兩段 tx 設計**，orchestration 為：
+
+```text
+1. reserve (wallet RPC)
+2. resolve refs + fee payer (caller pre-resolve)
+3. createSubmitted (in-memory entity factory, status=preparing)
+4. createInTx (tx 1, 寫入 preparing row)
+   失敗 → release wallet allocation best-effort + throw
+5. bind RPC (wallet allocation 綁 fundCaseId)
+   失敗 → deletePreparing best-effort + throw（不 release、依 wallet sweeper）
+6. progressInTx (tx 2, 內含 fastForwardToProcessed + replaceInTx → processed row)
+   失敗 → log + throw（row stuck preparing、wallet 已 bound、ops 介入）
+7. dispatch instruction (best-effort, out-of-tx)
+```
+
+**Submit 不變式**：**DB 看見 `processed` row 暗示 wallet allocation 已 bind**。Worker / backfill 看到 processed row 即可安全推進 instruct、不需檢 wallet binding 狀態；preparing row 對應 wallet 可能未 bound（bind 在 tx 1 與 tx 2 之間）、無權限被外部 worker 操作。
 
 完整 submit 後 statusHistory 累積四筆：
 
-| sequence | status       | actor                      | 由誰寫入                              | 註記                                                    |
-| -------- | ------------ | -------------------------- | ------------------------------------- | ------------------------------------------------------- |
-| 0        | `preparing`  | submitter（platform user） | entity factory `createSubmitted(...)` | draft 初始狀態                                          |
-| 1        | `reviewing`  | system                     | `autoProgressService.progress(...)`   | fast-forward 過渡                                       |
-| 2        | `processing` | system                     | `autoProgressService.progress(...)`   | fast-forward 過渡                                       |
-| 3        | `processed`  | system                     | `autoProgressService.progress(...)`   | fast-forward 終止；`processedAt` 設為等於 `submittedAt` |
+| sequence | status       | actor                      | 由誰寫入                                                                        | 註記                                                   |
+| -------- | ------------ | -------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| 0        | `preparing`  | submitter（platform user） | entity factory `createSubmitted(...)`                                           | draft 初始狀態；tx 1 持久化                            |
+| 1        | `reviewing`  | system                     | `autoProgressService.progressInTx(...)` 內 entity `fastForwardToProcessed(...)` | fast-forward 過渡；tx 2 寫入                           |
+| 2        | `processing` | system                     | 同上                                                                            | fast-forward 過渡                                      |
+| 3        | `processed`  | system                     | 同上                                                                            | fast-forward 終止；`processedAt` 設為等於 `occurredAt` |
 
 可達性：三 category 共用同一條快進路徑——可達狀態為 `{preparing, reviewing, processing, processed, transacting, completed, failed}`；不可達狀態為 `{cancelled, declined, rejected}`。
 
 Entity action methods 範圍亦對應收斂：
 
-| Method                                                             | 存在於 entity | 註記                                                                                                                                |
-| ------------------------------------------------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `static createSubmitted(...)`                                      | ✓             | factory，建立 `preparing` draft + structural invariant 校驗；fast-forward 由 `TransferIntentAutoProgressService.progress(...)` 承擔 |
-| `instruct(...)`                                                    | ✓             | `processed → transacting`，由 instruct use case 觸發                                                                                |
-| `handleSettled(...)`                                               | ✓             | `transacting → completed`，由 network handler 觸發                                                                                  |
-| `handleFailed(...)`                                                | ✓             | `transacting → failed`，由 network handler 觸發                                                                                     |
-| `accept` / `approve` / `release` / `cancel` / `reject` / `decline` | **不存在**    | 對應 status path 不可達，entity 不暴露這些 action                                                                                   |
+| Method                                                             | 存在於 entity | 註記                                                                                                                                                                          |
+| ------------------------------------------------------------------ | ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `static createSubmitted(...)`                                      | ✓             | factory，建立 `preparing` draft + structural invariant 校驗；fast-forward 由 `TransferIntentAutoProgressService.progress(...)` 承擔                                           |
+| `fastForwardToProcessed(...)`                                      | ✓             | service-facing helper，由 `TransferIntentAutoProgressService.progressInTx(...)` 於 tx 2 內呼叫；內部依 `submittedTransitionPath` 一次性完成三段 transition + 設 `processedAt` |
+| `instruct(...)`                                                    | ✓             | `processed → transacting`，由 instruct use case 觸發                                                                                                                          |
+| `handleSettled(...)`                                               | ✓             | `transacting → completed`，由 network handler 觸發                                                                                                                            |
+| `handleFailed(...)`                                                | ✓             | `transacting → failed`，由 network handler 觸發                                                                                                                               |
+| `accept` / `approve` / `release` / `cancel` / `reject` / `decline` | **不存在**    | 對應 status path 不可達，entity 不暴露這些 caller-facing action                                                                                                               |
 
 未來若 PM 規格引入合規審核、人工撤銷或拒絕需求，需重新引入相應 status path、entity action methods、與 lifecycle endpoint，並重新評估 `TransferIntentAutoProgressService` 政策表（見 Open Points）。
 
@@ -298,12 +314,12 @@ Plan lines 表達 logical「sender bucket → recipient bucket」流向；reserv
 
 對應 `WithdrawalIntent` 既有 use case 結構，但因 fast-forward 政策（見 Status machine 段），review / cancel / reject / acceptance queue 相關 use case 全部不存在：
 
-| Use case                                 | 角色                                                          | 對應 WithdrawalIntent            | 備註                                                                                                                                                                             |
-| ---------------------------------------- | ------------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PlatformSubmitTransferIntentUseCase`    | platform user 主動發起                                        | `PlatformSubmitWithdrawalIntent` | 三 category 共用此 use case；category 由 sender + recipient wallet type 自動推導。submit orchestration 呼叫 `TransferIntentAutoProgressService.progress(...)` 快進至 `processed` |
-| `InstructTransferIntentUseCase`          | 把 `processed` 推進到 `transacting`，發出 network transaction | `InstructWithdrawalIntent`       |                                                                                                                                                                                  |
-| `HandleNetworkTransactionSettledUseCase` | 處理 onchain 成功                                             | 同名                             | transfer 版本                                                                                                                                                                    |
-| `HandleNetworkTransactionFailedUseCase`  | 處理 onchain 失敗                                             | 同名                             | transfer 版本                                                                                                                                                                    |
+| Use case                                 | 角色                                                          | 對應 WithdrawalIntent            | 備註                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | ------------------------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PlatformSubmitTransferIntentUseCase`    | platform user 主動發起                                        | `PlatformSubmitWithdrawalIntent` | 三 category 共用此 use case；category 由 sender + recipient wallet type 自動推導。submit orchestration 採兩段 tx（preparing tx 1 → bind → progressInTx tx 2 → dispatch），於 tx 2 內呼叫 `TransferIntentAutoProgressService.progressInTx(...)` 快進至 `processed` |
+| `InstructTransferIntentUseCase`          | 把 `processed` 推進到 `transacting`，發出 network transaction | `InstructWithdrawalIntent`       |                                                                                                                                                                                                                                                                   |
+| `HandleNetworkTransactionSettledUseCase` | 處理 onchain 成功                                             | 同名                             | transfer 版本                                                                                                                                                                                                                                                     |
+| `HandleNetworkTransactionFailedUseCase`  | 處理 onchain 失敗                                             | 同名                             | transfer 版本                                                                                                                                                                                                                                                     |
 
 對應 `WithdrawalIntent` 但本期 **不存在** 的 use cases：
 
@@ -331,7 +347,7 @@ Plan lines 表達 logical「sender bucket → recipient bucket」流向；reserv
 
   不符合任一組合 entity 拒絕建立。
 
-- Fast-forward 過渡狀態（`reviewing` / `processing`）於 statusHistory 留有紀錄供前端顯示，但不對應任何 caller 可觸發的 use case——這些狀態純粹是 `TransferIntentAutoProgressService.progress(...)` 內部 transition path 的中介步驟。
+- Fast-forward 過渡狀態（`reviewing` / `processing`）於 statusHistory 留有紀錄供前端顯示，但不對應任何 caller 可觸發的 use case——這些狀態純粹是 `TransferIntentAutoProgressService.progressInTx(...)` 於 tx 2 內 transition path 的中介步驟。
 
 ### TransferIntentAutoProgressService
 
@@ -347,15 +363,23 @@ Plan lines 表達 logical「sender bucket → recipient bucket」流向；reserv
 
 ```ts
 class TransferIntentAutoProgressService {
-  // unconditional fast-forward: preparing → reviewing → processing → processed
-  progress(input: { entity: TransferIntentEntity<'draft'>; occurredAt: Date }): void;
+  constructor(private readonly transferIntentRepository: TransferIntentRepository) {}
+
+  // unconditional fast-forward + replaceInTx 的 progression cycle
+  // input: 已 bind wallet allocation 的 preparing row
+  // returns: processed row（含三段 fast-forward statusHistory + processedAt）
+  progressInTx(
+    input: { transferIntent: TransferIntent; occurredAt: Date },
+    tx: TransactionContext,
+  ): Promise<TransferIntent>;
 }
 ```
 
 落地考量：
 
-- Fast-forward 邏輯由本 service 承擔——caller（submit use case）拿到 entity factory 回的 `preparing` draft entity 後呼叫 `progress(...)`，service 依 `submittedTransitionPath` 對 entity 依序呼叫 `transitionTo(...)`，statusHistory append 三筆 system actor 紀錄，最後設 `entity.state.processedAt = occurredAt`
-- Service 為**同步、純 in-memory operation**：不持久化、不發 RPC、不接 transaction。Caller 負責於後續步驟 persist
+- Fast-forward 邏輯由 entity 內部的 `fastForwardToProcessed({ occurredAt, actor })` helper 一次性完成；service 負責準備 system actor、呼叫該 helper、隨即透過 `replaceInTx` 持久化 progressed row；caller 拿回 processed raw 用於後續 dispatch
+- Service 為 **persistence-aware operation**：含 `fromRaw → fastForwardToProcessed → replaceInTx` 完整 progression cycle、接 tx context；service 公開單一 method、collapse 原先 in-memory + persist 兩步為一個 atomic call
+- Service **不**含 instruction dispatch（**不**抽 `TransferIntentSideEffectService`）；dispatch 由 caller use case 顯式 own（best-effort、out-of-tx）。Transfer 端與 withdrawal mirror 在此分工不同：withdrawal autoProgress 內含 SideEffectService 耦合屬 legacy 設計、transfer 端從一開始解耦
 - 與 `WithdrawalIntentAutoProgressService` 命名對稱、但內部行為不同：withdrawal 為條件式 progress（依 category + 限額），transfer 為 unconditional fast-forward
 - 未來若 PM 引入條件式 progress（例如「大額轉帳需審核」），由該時期的 spec 重新評估 service shape 與 method 拆分；本期不引入 `canAuto*` 子方法
 
