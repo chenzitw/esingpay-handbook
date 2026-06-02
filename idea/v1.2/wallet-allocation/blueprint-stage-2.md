@@ -150,6 +150,7 @@ External 變體無 wallet/merchant/bucket 欄位——細節靠 `networkTransact
 - API read path：composer 透過 RPC 取得 NetworkTransactionDto，投影為 `WalletLedgerNetworkTransactionDto`，拼進 `WalletLedgerItemDto`
 - 與 fund `WithdrawalIntentComposed` 同 pattern
 - 不用 `Ref` 命名（Ref 是 raw 內 inline embed 的 pattern；本場景 row 上只有 id，靠 RPC 補資料）
+- **歸屬規則**：row 是否掛 `networkTransactionId` 取決於 cross-wallet movement（source/destination 非同一 internal wallet 才掛），詳見 design 層 [design-ledger-projection.md](./design-ledger-projection.md)。此規則取代早期「僅當有 external endpoint 才掛」的 code 行為——對 deposit / withdrawal 零變化，並修正 transfer principal（sender→recipient 跨 wallet 但無 external 端）漏掛 NT 的問題
 
 📌 延伸觀察（記下不展開）：
 

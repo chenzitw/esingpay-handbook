@@ -234,6 +234,8 @@ Mapper 負責按 `role` filter 組裝為 aggregate raw 的 `planLines` / `outcom
 
 > **本 section 描述的資源不在本次實作範圍。** 本次不定義 WalletLedgerItem / WalletCashflowItem 的 raw、table、repository 細節。但 projection context 原則、line source 規則、grouping 原則與 read model 粒度輪廓已初步收斂，作為未來實作的設計約束。
 
+> **NetworkTransaction 歸屬**：ledger row 的 `networkTransactionId` 歸屬 invariant（cross-wallet movement 才掛）獨立收斂於 [design-ledger-projection.md](./design-ledger-projection.md)。
+
 ### WalletLedgerItem（獨立資源，未來實作）
 
 面向使用者的帳本明細。由 `WalletAllocation` 操作驅動建立與更新。

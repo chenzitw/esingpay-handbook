@@ -1,6 +1,6 @@
 ---
 status: active
-updated_at: 2026-04-28
+updated_at: 2026-06-02
 updated_by: Tim
 remark: 本文件未依照 spec 規範撰寫，暫供內容參考，等待後續重構改寫。
 ---
@@ -494,7 +494,7 @@ At minimum:
 - currency code
 - `kind` for Ledger items, or `category` for Cashflow items
 
-Ledger DTO / composed rows may also carry display context such as merchant / wallet display information, `space`, derived `ownerType`, bucket, source, destination, and a compact network transaction reference when the row is directly related to an external network effect. These fields belong to the user-facing ledger read model or composed DTO shape; the overview does not require all of them to be stored directly on the persistence row.
+Ledger DTO / composed rows may also carry display context such as merchant / wallet display information, `space`, derived `ownerType`, bucket, source, destination, and a compact network transaction reference when the row is directly related to an external network effect. A row is "directly related to an external network effect" when its source and destination form a cross-wallet movement — either endpoint external, or both internal but different wallets — which includes transfer-intent principal moving between two distinct internal wallets; a same-wallet bucket reclassify (e.g. service fee available → held) carries no network transaction reference. These fields belong to the user-facing ledger read model or composed DTO shape; the overview does not require all of them to be stored directly on the persistence row.
 
 This supports future `TransferIntent` patterns where one fund case may map to multiple allocations.
 
