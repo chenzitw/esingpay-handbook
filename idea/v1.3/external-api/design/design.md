@@ -88,11 +88,11 @@ GET /external/v1/deposits/{id}
 
 目前對內 `DepositDto` 欄位對照另見：
 
-- [`internal-deposit-dto.md`](./internal-deposit-dto.md)
+- [`reference-internal-deposit-dto.md`](../references/reference-internal-deposit-dto.md)
 
 External Deposit DTO 草案另見：
 
-- [`external-deposit-dto.md`](./external-deposit-dto.md)
+- [`design-deposit-dto.md`](./design-deposit-dto.md)
 
 ---
 
@@ -109,11 +109,11 @@ GET  /external/v1/withdrawal-intents/{id}
 
 目前對內 GET response `WithdrawalIntentDto` 欄位對照另見：
 
-- [`internal-withdrawal-intent-dto.md`](./internal-withdrawal-intent-dto.md)
+- [`reference-internal-withdrawal-intent-dto.md`](../references/reference-internal-withdrawal-intent-dto.md)
 
 External GET response DTO 草案另見：
 
-- [`external-withdrawal-intent-dto.md`](./external-withdrawal-intent-dto.md)
+- [`design-withdrawal-intent-dto.md`](./design-withdrawal-intent-dto.md)
 
 ### POST Withdrawal Intent
 
@@ -123,11 +123,11 @@ POST /external/v1/withdrawal-intents
 
 目前對內 POST request DTO 欄位對照另見：
 
-- [`internal_post_withdrawal_intents.dto.md`](./internal-post_withdrawal_intents.dto.md)
+- [`reference-internal-submit-withdrawal-intent-dto.md`](../references/reference-internal-submit-withdrawal-intent-dto.md)
 
 External POST request DTO 草案另見：
 
-- [`external_post_withdrawal_intents.dto.md`](./external-post_withdrawal_intents.dto.md)
+- [`design-submit-withdrawal-intent-dto.md`](./design-submit-withdrawal-intent-dto.md)
 
 ### 外部 API 參考
 
@@ -152,17 +152,17 @@ GET /external/v1/wallets/{id}
 
 目前對內 merchant wallet API / DTO 欄位對照另見：
 
-- [`internal-wallet-dto.md`](./internal-wallet-dto.md)
+- [`reference-internal-wallet-dto.md`](../references/reference-internal-wallet-dto.md)
 
 External Wallet DTO 草案另見：
 
-- [`external-wallet-dto.md`](./external-wallet-dto.md)
+- [`design-wallet-dto.md`](./design-wallet-dto.md)
 
 ### Wallet Resolution
 
 External client 可以透過 `GET /external/v1/wallets` 取得可用 wallet，再於 `POST /external/v1/withdrawal-intents` 帶入 `senderWalletId`。
 
-後端仍需以 API key scope 驗證 wallet 是否屬於該 merchant：
+後端仍需以 API key 對應的 merchant 驗證 wallet 是否屬於該 merchant：
 
 ```text
 API key -> merchantId
@@ -264,45 +264,41 @@ referenceId
 
 ---
 
-## 6. Idempotency Key
+## 6. API Key 與 Console 管理
 
-TODO：確認 external write API 是否支援 `Idempotency-Key` header，以及保存時間、比對規則、錯誤回應格式。
+External API 使用 API key 作為商戶系統呼叫對外 API 的認證方式。
 
-`Idempotency-Key` 是 API retry 防重機制，用來避免 client 在 timeout、network retry 或重送 request 時建立重複的 withdrawal intent。
+第一版 API key 管理由 Console 提供，讓商戶可以自行新增 API key。
 
-參考：
+### 第一版範圍
 
-- [Pay.com Idempotent Requests](https://apiref.pay.com/reference/idempotent-requests)
+第一版只支援：
 
-建議使用 header：
+- 新增 API key。
+- 查看既有 API key 列表。
+- 停用 API key。
+- 設定 API key 對應的 IP whitelist。
 
-```http
-Idempotency-Key: unique-request-key
-```
+第一版不支援：
 
-適用場景：
+- 編輯既有 API key。
+- API key scope。
+- API key prefix。
+- `Idempotency-Key`。
 
-- `POST /external/v1/withdrawal-intents`
-- 未來其他 external write API
+API key 建立後若需要調整權限或重新配置，商戶應停用既有 key 並新增一把新的 API key。
 
-### 與 referenceId 的差異
+### API Scope
 
-`referenceId` 不應作為唯一的 idempotency 機制。
+第一版不處理 API key scope。
 
-兩者責任分工：
+只要使用有效且未停用的 API key，即可呼叫目前開放的 external API。
 
-| Field | Purpose | Scope |
-| --- | --- | --- |
-| `referenceId` | 業務對帳、webhook 識別 | 商戶業務單號 |
-| `Idempotency-Key` | API retry 防重 | 單次 API request retry group |
+未來若需要分離查詢與寫入權限，再新增 scope 設計，例如：
 
-### 初步規則
-
-- 同一 API key + same `Idempotency-Key` + same request body，應回傳同一結果。
-- 同一 API key + same `Idempotency-Key` + different request body，應回傳 conflict / invalid request。
-- `Idempotency-Key` 保存時間待定。
-
-
+- read deposits
+- read wallets
+- create withdrawal intents
 
 ---
 
@@ -311,7 +307,7 @@ Idempotency-Key: unique-request-key
 
 IP whitelist 設計另見：
 
-- [`ip_whitelist_planning.md`](./ip_whitelist_planning.md)
+- [`design-ip-whitelist.md`](./design-ip-whitelist.md)
 
 
 ---
