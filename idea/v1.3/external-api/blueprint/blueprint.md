@@ -136,12 +136,10 @@ Gateway 是 HTTP / API key 邊界。Cradle external module 是 external contract
 | Stage 6 | 2 天 | Console routing、API 串接、基本測試，功能面清楚。 |
 | Stage 7 | 5 天 | Docs framework、domain、Markdown 文件，偏獨立，可在 review window 做。 |
 
-Stage 6 / Stage 7 會安排在 PR reviewing 的等待窗口並行，因此 critical path 主要是 Stage 1-5。
-
 | 範圍 | 估時 | 備註 |
 | --- | ---: | --- |
 | Stage 1-5 | 20 天 | Backend 主線。 |
 | Stage 6-7 | 7 天 | 可放 PR review window 並行。 |
 | 整體 calendar | 約 4 週 | 若 review feedback 較少，Stage 6 / 7 可吸收在等待窗口中。 |
 
-等待 PR 時，會實作可同時並行的任務，例如 Console API key 介面、IP whitelist design guideline、docs framework research。若手邊沒有其他可並行任務，等待時間超過一天，則會直接合併代碼繼續做下去。若 PR 有意見反饋，則會告知該 phase 需延長，並附上 PR 連結。
+等待 PR 時，會實作可同時並行的任務，例如 Stage 6 / Stage 7 會安排在 PR reviewing 的等待窗口。若手邊沒有其他可並行任務，等待時間超過一天，則會直接合併代碼繼續做下去。若 PR 有意見反饋，則會告知該 stage 需延長，並附上 PR 連結。
