@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-03
+updated_at: 2026-06-04
 updated_by: Codex
 ---
 
@@ -8,7 +8,7 @@ updated_by: Codex
 
 ## 目標
 
-Stage 1 建立 external API boundary 的基本骨架。
+Stage 1 建立 External API boundary 的基本骨架。
 
 第一條驗證路徑使用：
 
@@ -18,15 +18,67 @@ Stage 1 建立 external API boundary 的基本骨架。
 
 ```text
 esing-pay-api-gateway src/rest/external
-  -> RestRpcClient
-  -> esingpay-cradle src/external
-  -> existing fund withdrawal intent capability
-  -> external response DTO
+  -> contract-rest external API
+  -> rest-rpc transport bridge
+  -> esingpay-cradle src/external/feature/fund/rest
+  -> external REST adapter response
 ```
 
-Stage 1 不完成所有 external API resource。它只先證明 boundary 成立，並提供後續 stage 可延伸的穩定結構。
+Stage 1 不完成所有 External API resource。它只先證明 boundary 成立，並提供後續 stage 可延伸的穩定結構。
 
-## 邊界
+## 邊界原則
+
+External API 有兩種不同的通訊邊界，不能混用資料夾語意。
+
+### Gateway To External
+
+API Gateway 到 cradle external 的這段是：
+
+```text
+HTTP request
+  -> contract-rest
+  -> RestRpcClient
+  -> cradle external REST adapter
+```
+
+這段雖然物理上使用 `@MessagePattern` / RPC transport 承載 request，但它的 contract 語意是 REST API proxy。
+
+因此 cradle 端實作應放在：
+
+```text
+apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent
+```
+
+不得放在：
+
+```text
+apps/esingpay-cradle/src/external/rpc/server
+```
+
+`external/rpc/server` 會誤導為 `contract-rpc` server implementation，不符合這段 gateway-to-external 的語意。
+
+### External To Service
+
+External module 往 Fund / Wallet / Network 等 service 取得能力時，才是 service-to-service method call。
+
+這段應使用：
+
+```text
+contract-rpc
+```
+
+例如：
+
+```text
+cradle external REST adapter
+  -> fund contract-rpc client
+  -> fund/rpc/server
+  -> fund query service / use case
+```
+
+未來即使 `fund`、`wallet`、`network` 從 `esingpay-cradle` 拆成獨立微服務，External module 也可維持相同 `contract-rpc` client boundary。
+
+## 程式碼放置
 
 External API Gateway 程式碼放在：
 
@@ -45,8 +97,9 @@ Stage 1 不得把 external controllers 或 adapters 放在：
 ```text
 apps/esing-pay-api-gateway/src/rest/fund
 apps/esing-pay-api-gateway/src/rest/wallet
-apps/esingpay-cradle/src/fund
-apps/esingpay-cradle/src/wallet
+apps/esingpay-cradle/src/fund/feature
+apps/esingpay-cradle/src/wallet/feature
+apps/esingpay-cradle/src/external/rpc/server
 ```
 
 Fund 和 wallet 仍是 business capability owners。External 是 integration adapter boundary。
@@ -60,16 +113,19 @@ Fund 和 wallet 仍是 business capability owners。External 是 integration ada
 - 新增 gateway external withdrawal intent controller，並以獨立 controller file 表示。
 - 新增 gateway external withdrawal intent proxy。
 - 新增 cradle external module。
-- 新增 cradle external withdrawal intent RPC adapter。
+- 新增 cradle external fund feature module。
+- 新增 cradle external withdrawal intent REST adapter。
 - 建立 boundary 使用的 `merchant-agent` identity。
-- 將 `GET /external/v1/withdrawal-intents` 從 gateway 串到 cradle。
+- 將 `GET /external/v1/withdrawal-intents` 從 gateway 串到 cradle external REST adapter。
+
+若 Stage 1 要接真實 withdrawal intent data，External 不直接 DI fund internal use case，應透過 fund `contract-rpc` capability 取得資料。
 
 範圍外：
 
 - 完整 API key persistence 與 validation。
 - 完整 IP whitelist enforcement。
 - Console API key management。
-- Docusaurus docs site。
+- Docs website。
 - `Idempotency-Key`。
 - API key scope。
 - API key prefix。
@@ -96,7 +152,7 @@ API identity 應使用 `merchant-agent`，不是 merchant user。
 
 ### 新增 `libs/contract-rest/src/lib/external/dto/withdrawal-intent.dto.ts`
 
-對應 `idea/v1.3/external-api/design/design-withdrawal-intent-dto.md`
+對應 `idea/v1.3/external-api/design/design-withdrawal-intent-dto.md`。
 
 ### 新增 `libs/contract-rest/src/lib/external/dto/search-withdrawal-intent-params.dto.ts`
 
@@ -115,6 +171,30 @@ Stage 1 可以先保持 params 最小化。除非 plan 發現既有 pattern 有�
 ### 新增 `libs/contract-rest/src/lib/external/index.ts`
 
 匯出 external namespace、APIs、DTOs。
+
+## Contract RPC
+
+Gateway 到 External 不新增 `contract-rpc`。
+
+只有 External 需要向 Fund / Wallet / Network 取得 service capability 時，才新增或重用 `contract-rpc`。
+
+若 Stage 1 後續要把 withdrawal intent list 接到真實資料，應先確認 fund 是否已有足夠 RPC capability。
+
+目前既有 fund RPC：
+
+```text
+libs/contract-rpc/src/lib/fund/rpc/withdrawal-intent.rpc.ts
+```
+
+若既有 method 只有 `getById`，但 External list 需要 merchant-scoped search，則應在 fund RPC contract 補上對應 read capability，再由：
+
+```text
+apps/esingpay-cradle/src/fund/rpc/server/withdrawal-intent
+```
+
+實作。
+
+External REST adapter 只能呼叫 fund RPC client，不應直接引用 fund internal use case 作為跨 service boundary。
 
 ## Identity
 
@@ -169,7 +249,7 @@ GET /external/v1/withdrawal-intents
 職責：
 
 - 接收 gateway controller request。
-- 將 typed RestRpc request 轉送到 cradle。
+- 將 typed RestRpc request 轉送到 cradle external REST adapter。
 - 回傳 cradle response，不做 business mapping。
 
 ### 新增 `apps/esing-pay-api-gateway/src/rest/external/dto/ExternalSearchWithdrawalIntentParamsQuery.ts`
@@ -198,23 +278,34 @@ Cradle external boundary 的 root module。
 
 職責：
 
-- 匯入 external RPC server module。
-- 匯入 Stage 1 需要的 external feature modules。
+- 匯入 external feature module。
 - 讓 external adapter wiring 與 fund / wallet root adapters 保持獨立。
 
-### 新增 `apps/esingpay-cradle/src/external/rpc/server/server.module.ts`
+### 新增 `apps/esingpay-cradle/src/external/feature/feature.module.ts`
 
-聚合 cradle external RPC server adapters。
+聚合 external feature modules。
 
-Stage 1 匯入 external withdrawal intent RPC server module。
+Stage 1 匯入 external fund feature module。
 
-### 新增 `apps/esingpay-cradle/src/external/rpc/server/withdrawal-intent/withdrawal-intent.module.ts`
+### 新增 `apps/esingpay-cradle/src/external/feature/fund/fund.module.ts`
 
-註冊 external withdrawal intent RPC controller、service、mapper。
+聚合 external fund adapters。
 
-匯入 existing fund withdrawal intent context module，讓 external adapter 呼叫既有 fund capability，而不是重寫能力。
+Stage 1 匯入 external fund REST module。
 
-### 新增 `apps/esingpay-cradle/src/external/rpc/server/withdrawal-intent/withdrawal-intent.controller.ts`
+### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/rest.module.ts`
+
+聚合 external fund REST adapters。
+
+Stage 1 匯入 external withdrawal intent REST module。
+
+### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent/withdrawal-intent.module.ts`
+
+註冊 external withdrawal intent REST controller、service、mapper。
+
+如果本 stage 接真實資料，這個 module 應匯入 fund RPC client module 或提供對應 RPC client wiring，不應匯入 fund internal feature context module。
+
+### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent/withdrawal-intent.controller.ts`
 
 接收 external withdrawal intent list 的 RestRpc message。
 
@@ -224,7 +315,9 @@ Stage 1 匯入 external withdrawal intent RPC server module。
 - 接收 typed RestRpc request。
 - 委派給 external withdrawal intent service。
 
-### 新增 `apps/esingpay-cradle/src/external/rpc/server/withdrawal-intent/withdrawal-intent.service.ts`
+雖然 controller 使用 `@MessagePattern`，它仍是 REST adapter，因為它對應的是 `contract-rest/external`。
+
+### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent/withdrawal-intent.service.ts`
 
 協調 external list request。
 
@@ -232,26 +325,26 @@ Stage 1 匯入 external withdrawal intent RPC server module。
 
 - 驗證 request identity 是 `merchant-agent`。
 - 從 identity 取出 merchant scope。
-- 將 external search params 轉成既有 merchant-scoped withdrawal intent query。
-- 呼叫既有 merchant withdrawal intent search capability。
-- 將 use-case errors 轉成 external REST result codes。
+- 將 external search params 轉成 fund RPC search input。
+- 呼叫 fund `contract-rpc` client 取得 withdrawal intent data。
+- 將 RPC result / errors 轉成 external REST result codes。
 - 回傳 external contract response envelope。
 
-### 新增 `apps/esingpay-cradle/src/external/rpc/server/withdrawal-intent/withdrawal-intent.mapper.ts`
+### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent/withdrawal-intent.mapper.ts`
 
-負責 external contract DTOs 與既有 fund application data 之間的 mapping。
+負責 external contract DTOs 與 fund RPC DTOs 之間的 mapping。
 
 職責：
 
 - 解碼並 normalize external search params。
-- 將 internal withdrawal intent composed/result data map 成 `ExternalWithdrawalIntentDto`。
+- 將 fund RPC DTO map 成 `ExternalWithdrawalIntentDto`。
 - 隱藏 internal-only fields，例如 actor details、full status history、wallet allocation id、fee payer wallet strategy、internal network endpoint lifecycle。
 
 ### 修改 `apps/esingpay-cradle/src/app.module.ts`
 
 匯入 new cradle external app module。
 
-這會讓 cradle 啟動時註冊 external RPC server。
+這會讓 cradle 啟動時註冊 external REST adapter。
 
 ## 第一個 Request Walkthrough
 
@@ -261,20 +354,24 @@ Stage 1 request path 應如下：
 GET /external/v1/withdrawal-intents
   -> gateway external withdrawal-intent.controller
   -> gateway external withdrawal-intent.proxy
-  -> cradle external withdrawal-intent.controller
-  -> cradle external withdrawal-intent.service
-  -> existing merchant-scoped withdrawal intent search capability
+  -> cradle external feature/fund/rest withdrawal-intent.controller
+  -> cradle external feature/fund/rest withdrawal-intent.service
+  -> fund contract-rpc client
+  -> fund/rpc/server withdrawal-intent controller
+  -> fund query service / use case
   -> cradle external withdrawal-intent.mapper
   -> ExternalWithdrawalIntentDto list response
 ```
+
+若 Stage 1 只做 boundary proof，`cradle external feature/fund/rest withdrawal-intent.service` 可以先回 mock response；但資料夾與 module placement 仍應使用 REST adapter 結構，不應使用 `external/rpc/server`。
 
 ## 重用策略
 
 Stage 1 應重用：
 
 - Existing RestRpcClient 與 RestRpc topic mapping infrastructure。
-- Existing merchant-scoped withdrawal intent search capability。
-- Existing fund withdrawal intent context module。
+- External `contract-rest` API definition。
+- Fund `contract-rpc` capability。
 - Existing paging result pattern。
 
 Stage 1 不應重用：
@@ -283,6 +380,7 @@ Stage 1 不應重用：
 - Portal fund REST DTO 作為 external response DTO。
 - Merchant user identity 作為 API key identity。
 - Fund REST module 作為 external route owner。
+- Fund internal use case 作為 external-to-fund service boundary。
 
 ## 驗證目標
 
@@ -292,8 +390,8 @@ Stage 1 完成時，應能證明：
 HTTP GET /external/v1/withdrawal-intents
   -> gateway external controller
   -> gateway external proxy
-  -> cradle external RPC adapter
-  -> existing fund withdrawal intent capability
+  -> cradle external REST adapter
+  -> optional fund contract-rpc call
   -> external DTO response
 ```
 
