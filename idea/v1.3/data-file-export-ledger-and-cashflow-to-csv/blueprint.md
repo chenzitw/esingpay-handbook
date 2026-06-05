@@ -157,7 +157,7 @@ Path param `format` 以 `ExportFileFormat` enum 驗證。
 ### 範圍
 
 In scope：
-- 4 組 REST slice（plat/merch × ledger/cashflow）：controller / service / mapper
+- 2 組 scope-level REST slice（plat-wallet-export / merch-wallet-export）：controller / service / mapper
 - 4 支 use-case（export-platform-ledger / export-merchant-ledger /
   export-platform-cashflow / export-merchant-cashflow）
 - WalletContextModule（shared service 集中提供）
@@ -181,9 +181,13 @@ Source fetch、CSV 生成、檔案上傳、merchant timezone 等跨 slice 共用
 統一由 `wallet-context.module.ts` 提供與匯出，
 REST slice module 僅 import WalletContextModule，不自行宣告共用 provider。
 
-**D3. REST slice 結構對稱**
-四組 REST slice 各自有 module / controller / service / mapper，
-命名與結構完全對稱，不因 scope 差異合并或拆分。
+**D3. REST slice 為 scope-level 結構**
+REST slice 以 scope 為單位建立，共 2 組：
+- `rest/plat-wallet-export/`：承載 platform ledger 與 cashflow export
+- `rest/merch-wallet-export/`：承載 merchant ledger 與 cashflow export
+
+每組 slice 各自有 module / controller / service / mapper，
+對齊 `platWalletExportApi` / `merchWalletExportApi` 的 scope-level contract 結構。
 
 **D4. Provider 端再次驗證 identity 類型**
 REST service 層在執行業務前，驗證 RPC request 的 identity type
