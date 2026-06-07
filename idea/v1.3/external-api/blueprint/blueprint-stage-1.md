@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-04
+updated_at: 2026-06-07
 updated_by: Codex
 ---
 
@@ -14,17 +14,23 @@ Stage 1 建立 External API boundary 的基本骨架。
 
 - `GET /external/v1/withdrawal-intents`
 
-這條路徑用來證明：
+這條路徑用來證明 external API boundary 可接到真實 withdrawal intent list data：
 
 ```text
 esing-pay-api-gateway src/rest/external
   -> contract-rest external API
   -> rest-rpc transport bridge
   -> esingpay-cradle src/external/feature/fund/rest
-  -> external REST adapter response
+  -> ExternalWithdrawalIntentClient
+  -> WithdrawalIntentFacade
+  -> WithdrawalIntentQueryService.searchByMerchantId
+  -> WithdrawalIntentRepository.search
+  -> WithdrawalIntentComposer.composeMany
+  -> external mapper
+  -> ExternalWithdrawalIntentDto list response
 ```
 
-Stage 1 不完成所有 External API resource。它只先證明 boundary 成立，並提供後續 stage 可延伸的穩定結構。
+Stage 1 不完成所有 External API resource，但 `GET /external/v1/withdrawal-intents` 必須接到真實資料，不以 mock response 作為完成目標。
 
 ## 邊界原則
 
@@ -61,7 +67,7 @@ apps/esingpay-cradle/src/external/rpc/server
 
 External module 往 Fund / Wallet / Network 等 service 取得能力時，才是 service-to-service method call。
 
-這段應使用：
+長期正解應使用：
 
 ```text
 contract-rpc
@@ -77,6 +83,17 @@ cradle external REST adapter
 ```
 
 未來即使 `fund`、`wallet`、`network` 從 `esingpay-cradle` 拆成獨立微服務，External module 也可維持相同 `contract-rpc` client boundary。
+
+但在 `contract-rpc` serialization 尚未完整支援 domain raw object 前，cradle 內跨 microservice 的暫時解法是 facade / client pattern：
+
+```text
+cradle external REST adapter
+  -> external client
+  -> fund / wallet facade
+  -> fund / wallet query service / composer
+```
+
+這個暫時解法只允許透過 client / facade 控制邊界，不允許 external adapter 直接 import 或 inject fund / wallet internal context、use case、query service、composer。
 
 ## 程式碼放置
 
@@ -117,8 +134,13 @@ Fund 和 wallet 仍是 business capability owners。External 是 integration ada
 - 新增 cradle external withdrawal intent REST adapter。
 - 建立 boundary 使用的 `merchant-agent` identity。
 - 將 `GET /external/v1/withdrawal-intents` 從 gateway 串到 cradle external REST adapter。
+- 以 facade / client pattern 接到真實 withdrawal intent list data。
+- 補足 `WithdrawalIntentQueryService.searchByMerchantId`。
+- 新增 `WithdrawalIntentFacade`。
+- 新增 `ExternalWithdrawalIntentClient`。
+- 將 composed withdrawal intent list map 成 `ExternalWithdrawalIntentDto` list response。
 
-若 Stage 1 要接真實 withdrawal intent data，External 不直接 DI fund internal use case，應透過 fund `contract-rpc` capability 取得資料。
+Stage 1 需接真實 withdrawal intent list data。External 不直接 DI fund internal use case。長期應透過 fund `contract-rpc` capability 取得資料；但目前 fund withdrawal intent RPC 尚無 merchant-scoped search capability，且 RPC serialization 尚未完成，因此 Stage 1 暫時透過 external client -> fund facade 取得資料。
 
 範圍外：
 
@@ -178,7 +200,7 @@ Gateway 到 External 不新增 `contract-rpc`。
 
 只有 External 需要向 Fund / Wallet / Network 取得 service capability 時，才新增或重用 `contract-rpc`。
 
-若 Stage 1 後續要把 withdrawal intent list 接到真實資料，應先確認 fund 是否已有足夠 RPC capability。
+Stage 1 需要把 withdrawal intent list 接到真實資料。長期應先確認 fund 是否已有足夠 RPC capability。
 
 目前既有 fund RPC：
 
@@ -186,7 +208,7 @@ Gateway 到 External 不新增 `contract-rpc`。
 libs/contract-rpc/src/lib/fund/rpc/withdrawal-intent.rpc.ts
 ```
 
-若既有 method 只有 `getById`，但 External list 需要 merchant-scoped search，則應在 fund RPC contract 補上對應 read capability，再由：
+目前既有 method 只有 `getById` / `listByIds`，但 External list 需要 merchant-scoped search。長期應在 fund RPC contract 補上對應 read capability，再由：
 
 ```text
 apps/esingpay-cradle/src/fund/rpc/server/withdrawal-intent
@@ -194,7 +216,99 @@ apps/esingpay-cradle/src/fund/rpc/server/withdrawal-intent
 
 實作。
 
-External REST adapter 只能呼叫 fund RPC client，不應直接引用 fund internal use case 作為跨 service boundary。
+但在 RPC serialization 尚未完成前，Stage 1 不補真 RPC。Stage 1 暫時解法是：
+
+```text
+external REST adapter
+  -> external withdrawal-intent client
+  -> fund withdrawal-intent facade
+  -> WithdrawalIntentQueryService.searchByMerchantId
+  -> WithdrawalIntentRepository.search
+  -> WithdrawalIntentComposer.composeMany
+```
+
+External REST adapter 只能呼叫 external client，不應直接引用 fund internal use case、query service、composer 或 context module 作為跨 service boundary。
+
+## Facade / Query Service 實作要求
+
+Stage 1 以 `GET /external/v1/withdrawal-intents` 接到真實資料為目標，因此需要先補足 fund read capability 的 facade / query service 積木。
+
+對位參考：
+
+```text
+apps/esingpay-cradle/src/wallet/feature/wallet/service/wallet-query.service.ts
+```
+
+參考重點：
+
+- query service 接收 paging input。
+- query service 轉成 repository search query。
+- repository 回傳 `items` 與 `count`。
+- query service 回傳 list items 與 paging output。
+- facade 只包 capability owner 的 query service method，不直接做 REST DTO mapping。
+
+### Withdrawal Intent Query Service
+
+目前 `WithdrawalIntentQueryService` 只有 `getById` / `listByIds`，Stage 1 需要新增 merchant-scoped search method：
+
+```text
+apps/esingpay-cradle/src/fund/feature/withdrawal-intent/service/withdrawal-intent-query.service.ts
+```
+
+建議 shape：
+
+```ts
+export type SearchWithdrawalIntentsByMerchantIdQuery = {
+  merchantId: Uuid;
+  senderWalletIdIn?: bigint[];
+  statusIn?: WithdrawalIntentStatus[];
+  paging?: PartialOffsetPaging;
+};
+
+export type SearchWithdrawalIntentsByMerchantIdResult = {
+  items: WithdrawalIntentComposed[];
+  paging: OffsetPagingResult;
+};
+
+@Injectable()
+export class WithdrawalIntentQueryService {
+  async searchByMerchantId(
+    query: SearchWithdrawalIntentsByMerchantIdQuery,
+  ): Promise<Either.Either<SearchWithdrawalIntentsByMerchantIdResult, BasicError<QueryErrorType.PagingInvalid>>> {
+    // resolve paging
+    // WithdrawalIntentRepository.search
+    // WithdrawalIntentComposer.composeMany
+  }
+}
+```
+
+`searchByMerchantId` 可參考 `MerchantSearchWithdrawalIntentsUseCase` 既有查詢條件，但不應讓 external adapter 直接呼叫該 use case。
+
+### Withdrawal Intent Facade
+
+新增：
+
+```text
+apps/esingpay-cradle/src/fund/facade/withdrawal-intent.facade.ts
+```
+
+Facade method：
+
+```ts
+@Injectable()
+export class WithdrawalIntentFacade {
+  constructor(
+    @Inject(WithdrawalIntentQueryService)
+    private readonly withdrawalIntentQueryService: WithdrawalIntentQueryService,
+  ) {}
+
+  async searchWithdrawalIntents(input: SearchWithdrawalIntentsByMerchantIdQuery) {
+    return this.withdrawalIntentQueryService.searchByMerchantId(input);
+  }
+}
+```
+
+Stage 1 external adapter 透過 `ExternalWithdrawalIntentClient` 呼叫 `WithdrawalIntentFacade.searchWithdrawalIntents`。
 
 ## Identity
 
@@ -303,7 +417,9 @@ Stage 1 匯入 external withdrawal intent REST module。
 
 註冊 external withdrawal intent REST controller、service、mapper。
 
-如果本 stage 接真實資料，這個 module 應匯入 fund RPC client module 或提供對應 RPC client wiring，不應匯入 fund internal feature context module。
+這個 module 應匯入 external client module。client 目前可暫時透過 facade 呼叫 fund capability；未來再抽換為 fund `contract-rpc` client。
+
+這個 module 不應匯入 fund internal feature context module。
 
 ### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent/withdrawal-intent.controller.ts`
 
@@ -325,19 +441,19 @@ Stage 1 匯入 external withdrawal intent REST module。
 
 - 驗證 request identity 是 `merchant-agent`。
 - 從 identity 取出 merchant scope。
-- 將 external search params 轉成 fund RPC search input。
-- 呼叫 fund `contract-rpc` client 取得 withdrawal intent data。
-- 將 RPC result / errors 轉成 external REST result codes。
+- 將 external search params 轉成 external client search input。
+- 呼叫 external client 取得 withdrawal intent data。
+- 將 client result / errors 轉成 external REST result codes。
 - 回傳 external contract response envelope。
 
 ### 新增 `apps/esingpay-cradle/src/external/feature/fund/rest/withdrawal-intent/withdrawal-intent.mapper.ts`
 
-負責 external contract DTOs 與 fund RPC DTOs 之間的 mapping。
+負責 external contract DTOs 與 fund capability result 之間的 mapping。
 
 職責：
 
 - 解碼並 normalize external search params。
-- 將 fund RPC DTO map 成 `ExternalWithdrawalIntentDto`。
+- 將 fund capability result map 成 `ExternalWithdrawalIntentDto`。
 - 隱藏 internal-only fields，例如 actor details、full status history、wallet allocation id、fee payer wallet strategy、internal network endpoint lifecycle。
 
 ### 修改 `apps/esingpay-cradle/src/app.module.ts`
@@ -356,14 +472,24 @@ GET /external/v1/withdrawal-intents
   -> gateway external withdrawal-intent.proxy
   -> cradle external feature/fund/rest withdrawal-intent.controller
   -> cradle external feature/fund/rest withdrawal-intent.service
-  -> fund contract-rpc client
-  -> fund/rpc/server withdrawal-intent controller
-  -> fund query service / use case
+  -> ExternalWithdrawalIntentClient
+  -> WithdrawalIntentFacade
+  -> WithdrawalIntentQueryService.searchByMerchantId
+  -> WithdrawalIntentRepository.search
+  -> WithdrawalIntentComposer.composeMany
   -> cradle external withdrawal-intent.mapper
   -> ExternalWithdrawalIntentDto list response
 ```
 
-若 Stage 1 只做 boundary proof，`cradle external feature/fund/rest withdrawal-intent.service` 可以先回 mock response；但資料夾與 module placement 仍應使用 REST adapter 結構，不應使用 `external/rpc/server`。
+Stage 1 不以 mock response 作為完成目標。`cradle external feature/fund/rest withdrawal-intent.service` 必須透過 `ExternalWithdrawalIntentClient` 接到真實 withdrawal intent list data。
+
+未來 `contract-rpc` serialization 完成後，上述 client / facade 位置可抽換成：
+
+```text
+external withdrawal-intent client
+  -> fund contract-rpc client
+  -> fund/rpc/server withdrawal-intent controller
+```
 
 ## 重用策略
 
@@ -371,7 +497,7 @@ Stage 1 應重用：
 
 - Existing RestRpcClient 與 RestRpc topic mapping infrastructure。
 - External `contract-rest` API definition。
-- Fund `contract-rpc` capability。
+- Temporary facade / client boundary，或未來 Fund `contract-rpc` capability。
 - Existing paging result pattern。
 
 Stage 1 不應重用：
@@ -381,6 +507,7 @@ Stage 1 不應重用：
 - Merchant user identity 作為 API key identity。
 - Fund REST module 作為 external route owner。
 - Fund internal use case 作為 external-to-fund service boundary。
+- Fund / wallet internal context 作為 external adapter dependency。
 
 ## 驗證目標
 
@@ -391,7 +518,12 @@ HTTP GET /external/v1/withdrawal-intents
   -> gateway external controller
   -> gateway external proxy
   -> cradle external REST adapter
-  -> optional fund contract-rpc call
+  -> ExternalWithdrawalIntentClient
+  -> WithdrawalIntentFacade
+  -> WithdrawalIntentQueryService.searchByMerchantId
+  -> WithdrawalIntentRepository.search
+  -> WithdrawalIntentComposer.composeMany
+  -> external mapper
   -> external DTO response
 ```
 
