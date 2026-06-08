@@ -5,7 +5,7 @@
 設計目標：
 
 - 與 `ExternalDepositDto` 保持接近的 response shape。
-- 支援多幣種與不同 payment rail，例如 crypto、bank。
+- 支援多幣種與不同 payment rail；本版先定義 blockchain transaction detail，bank detail 留到後續 phase。
 - 保留對帳與交易追蹤需要的 transaction detail / legs
 - 不直接暴露 internal `WithdrawalIntentDto`、完整 `CorrelatedNetworkTransactionDto`、actor、status history、fee payer strategy。
 
@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | `id` | `string` | Withdrawal Intent 業務單 ID，也就是這筆出金申請的識別碼。 |
 | `wallet` | `WalletDto` | 出金扣款來源 wallet 的 external 摘要。 |
-| `transaction` | `WithdrawalTransactionDto` | 本筆 withdrawal intent 使用的 payment rail / network / transaction 摘要。 |
+| `transaction` | `WithdrawalTransactionDto \| null` | 本筆 withdrawal intent 使用的 payment rail / network / transaction 摘要；若尚未建立 network transaction 則為 `null`。 |
 | `destination` | `ExternalWithdrawalDestinationDto` | 出金收款方 / 目的地。
 | `status` | `WithdrawalIntentStatus` | 對外 Withdrawal Intent 狀態。 |
 | `amount` | `NumericString` | 出金申請原始金額。 |
@@ -31,17 +31,16 @@
 | Key | Type | 代表意義 |
 | --- | --- | --- |
 | `id` | `string` | Wallet ID。 |
-| `type` | `string` | Wallet 類型。 |
+| `type` | `WalletType` | Wallet 類型，使用 `contract-base` wallet enum。 |
 
 
 ## WithdrawalTransactionDto
 
 | Key | Type | 代表意義 |
 | --- | --- | --- |
-| `type` | `'blockchain' \| 'bank'` | Payment rail 類型。 |
-| `provider` | `string` | Rail provider，例如 `tron`、`solana`、`swift`、`stripe`。 |
+| `type` | `NetworkType` | Network transaction 類型，使用 `contract-base` network enum。 |
+| `provider` | `NetworkProvider` | Network provider，使用 `contract-base` network enum。 |
 | `blockchain` | `BlockchainTransactionDetailDto \| null` | Blockchain-specific transaction detail。 |
-| `bank` | `BankTransferDetailDto \| null` | Bank-specific transfer detail。 |
 | `legs` | `ExternalLegsDto[]` | 此交易實際造成的資產流動明細，例如 principal、network fee。 |
 
 ### BlockchainTransactionDetailDto
@@ -53,23 +52,21 @@
 | `fromAddress` | `string` | 鏈上來源地址。 |
 | `toAddress` | `string` | 鏈上目的地址。 |
 
-### BankTransferDetailDto (future)
+### BankTransferDetailDto
 
-| Key | Type | 代表意義 |
-| --- | --- | --- |
-| `rail` | `string` | Bank transfer rail，例如 `swift`、`ach`、`sepa`。 |
-| `providerReferenceId` | `string \| null` | Provider reference id。 |
-| `bankReferenceId` | `string \| null` | Bank-side reference id。 |
-| `senderBankCode` | `string \| null` | Sender bank code。 |
-| `recipientBankCode` | `string \| null` | Recipient bank code。 |
+本版先不定義 bank transfer detail，也不在 `WithdrawalTransactionDto` 回傳 `bank` 欄位。
 
 ### ExternalLegsDto
 
 | Key | Type | 代表意義 |
 | --- | --- | --- |
 | `type` | `'principal' \| 'network_fee'` | 此交易造成的資產流動類型。 |
-| `network` | `string \| null` | 此 legs 對應的 network。 |
+| `currencyCode` | `CurrencyCode` | 此 leg 金額所屬幣種。 |
 | `amount` | `NumericString` | 此 legs 的金額。 |
+
+### Amendments
+
+- [`amendment-external-transaction-leg-currency-code.md`](../amendments/amendment-external-transaction-leg-currency-code.md)
 
 
 ## ExternalWithdrawalDestinationDto

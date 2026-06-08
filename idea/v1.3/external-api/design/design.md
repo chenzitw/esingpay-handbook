@@ -115,6 +115,10 @@ External GET response DTO 草案另見：
 
 - [`design-withdrawal-intent-dto.md`](./design-withdrawal-intent-dto.md)
 
+Transaction legs currencyCode amendment 留底另見：
+
+- [`amendment-external-transaction-leg-currency-code.md`](../amendments/amendment-external-transaction-leg-currency-code.md)
+
 ### POST Withdrawal Intent
 
 ```http

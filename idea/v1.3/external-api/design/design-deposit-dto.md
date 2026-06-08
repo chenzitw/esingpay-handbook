@@ -67,7 +67,7 @@
 | Key | Type | 代表意義 |
 | --- | --- | --- |
 | `type` | `'principal' \| 'network_fee'` | 此交易造成的資產流動類型。 |
-| `currencyCode` | `string` | 此 legs 對應的資產代碼。 |
+| `currencyCode` | `CurrencyCode` | 此 leg 金額所屬幣種。 |
 | `amount` | `NumericString` | 此 legs 的金額。 |
 
 ## ExternalDepositSourceDto
