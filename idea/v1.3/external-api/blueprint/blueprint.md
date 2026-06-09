@@ -72,16 +72,16 @@ External API 面向商戶系統整合，應隱藏內部後台流程、actor 細�
 
 - API key scope。
 
-### Stage 5：IP 白名單
+### ~~Stage 5：IP 白名單~~
 
-完成 External API 來源限制：
+本版本不做 Stage 5。IP whitelist 留作後續版本再規劃。
 
-- API key level IP whitelist 設定。
-- IP whitelist 檢查。
-- Client IP 解析規則。
-- API Gateway 解析來源 IP 後，傳給 cradle verify RPC。
-- Cradle 必須先確認 request 來源是可信 API Gateway，才可使用 gateway 傳入的來源 IP。
-- 拒絕錯誤 mapping。
+- ~~API key level IP whitelist 設定。~~
+- ~~IP whitelist 檢查。~~
+- ~~Client IP 解析規則。~~
+- ~~API Gateway 解析來源 IP 後，傳給 cradle verify RPC。~~
+- ~~Cradle 必須先確認 request 來源是可信 API Gateway，才可使用 gateway 傳入的來源 IP。~~
+- ~~拒絕錯誤 mapping。~~
 
 ### Stage 6：Console
 
@@ -98,7 +98,7 @@ External API 面向商戶系統整合，應隱藏內部後台流程、actor 細�
 - 上線新的 external API 文件網站。
 - 建立新的 docs domain。
 - 使用 Markdown 產出網頁的文件框架工具。
-- 撰寫 External API auth / IP whitelist / endpoint examples。
+- 撰寫 External API auth / endpoint examples。
 
 ## 端到端流程
 
@@ -108,7 +108,6 @@ External request 的整體流程：
 Merchant system
   -> esing-pay-api-gateway /external/v1/*
   -> API key guard
-  -> IP whitelist guard
   -> 由 API key 建立 merchant-agent identity
   -> RestRpcClient request
   -> esingpay-cradle src/external RPC server
@@ -132,13 +131,13 @@ Gateway 是 HTTP / API key 邊界。Cradle external module 是 external contract
 | Stage 2 | 3 天 | Read APIs 可大量沿用 Stage 1 樣板與既有 use case / query service，主要工作是 mapper、ownership、DTO。 |
 | Stage 3 | 2 天 | 抽 shared submitter 與 external submit use case，改動集中，方向已明確。 |
 | Stage 4 | 5 天 | API key 新資料模型、hash、create / list / delete、verify RPC、gateway guard、credential owner 決策，未知較高。 |
-| Stage 5 | 7 天 | IP whitelist、Client IP 信任鏈、gateway header / IP 解析、cradle verify 整合、安全邊界確認，未知最高。 |
+| ~~Stage 5~~ | ~~7 天~~ | ~~IP whitelist、Client IP 信任鏈、gateway header / IP 解析、cradle verify 整合、安全邊界確認，未知最高。~~ 本版本不做。 |
 | Stage 6 | 2 天 | Console routing、API 串接、基本測試，功能面清楚。 |
 | Stage 7 | 5 天 | Docs framework、domain、Markdown 文件，偏獨立，可在 review window 做。 |
 
 | 範圍 | 估時 | 備註 |
 | --- | ---: | --- |
-| Stage 1-5 | 20 天 | Backend 主線。 |
+| Stage 1-4 | 13 天 | Backend 主線；Stage 5 本版本不做。 |
 | Stage 6-7 | 7 天 | 可放 PR review window 並行。 |
 | 整體 calendar | 約 4 週 | 若 review feedback 較少，Stage 6 / 7 可吸收在等待窗口中。 |
 
