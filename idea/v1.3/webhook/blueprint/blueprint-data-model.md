@@ -39,8 +39,9 @@ updated_by: Codex
 
 - `signing_secret` 保存於 subscription。
 - 第一版不開放 UI 調整。
-- 建立 subscription 時由服務產生，或依服務環境變數套用預設值。
+- 建立 subscription 時第一版先由服務環境變數提供預設 signing secret 並寫入 subscription。
 - 實作 plan 需確認 secret 是否加密保存；因系統需要用它產生簽章，不能只存不可逆 hash。
+- 每個 subscription 使用獨立隨機 secret 與 rotate flow 不在第一版 scope；若後續納入，需回到 API surface 與 data model 補足。
 
 ## Event Type Catalog
 

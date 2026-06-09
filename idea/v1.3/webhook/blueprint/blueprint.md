@@ -129,7 +129,7 @@ Worker 執行 endpoint POST、更新 delivery 結果；recovery scheduler 補償
 依賴：
 
 - Dispatcher 已能建立 delivery。
-- Signing secret 保存與產生方式已由 plan/codebase survey 確認。
+- Signing secret 第一版由服務環境變數預設值寫入；保存與讀取方式已由 plan/codebase survey 確認。
 - Delivery payload snapshot 已符合 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md)。
 - Timeout 與 retry 第一版策略已決定。
 
@@ -192,9 +192,9 @@ Parallelism：
 ## Pattern Gaps
 
 - Outbox dispatcher 與 delivery worker 若 codebase 尚無既有 pattern，plan 需先 survey queue / scheduler / worker 既有實踐。
-- Signing secret 的生成、保存與輪替若 codebase 尚無 convention，plan 需明確列出採用方式，後續穩定後蒸餾進 guide。
+- Signing secret 的保存、讀取與輪替若 codebase 尚無 convention，plan 需明確列出採用方式，後續穩定後蒸餾進 guide。
 - Webhook payload 第一版 envelope 已在 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md) 定案；Phase 2 plan 仍需查驗 withdrawal / deposit 欄位來源。
-- Queue topic 命名若尚無 guide convention，Phase 3 plan 需明確記錄採用理由。
+- Queue provider 第一版採 Azure Service Bus；queue/topic 命名若尚無 guide convention，Phase 3 plan 需明確記錄採用理由。
 
 ## Open Points
 

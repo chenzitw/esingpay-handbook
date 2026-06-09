@@ -105,5 +105,5 @@ dispatcher
 ## Open Points
 
 - Webhook 是否在 codebase 中成為獨立 top-level domain/module，或先依現有 merchant/notification boundary 掛載。
-- Signing secret generation/rotation 是否需要獨立 service。
+- Signing secret storage/read boundary 與 rotation 是否需要獨立 service。
 - Payload builder 是否屬 event production capability，或拆成獨立 mapper/builder capability。

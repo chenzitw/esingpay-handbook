@@ -24,6 +24,8 @@ updated_by: Claude
 
 現況：以條件句處理——「如果 codebase 採 polling scheduler 而非 queue 觸發 dispatcher，`webhook.outbox.dispatch` 可不建立」。條件未決，Phase 3 plan 作者無法確認 queue topology。
 
+已知補充：queue provider 第一版走 Azure Service Bus。這能鎖定 delivery execution 的 queue provider，但 dispatcher 仍需決定是 polling scheduler 觸發，或由 Azure Service Bus job 觸發。
+
 需要的決策：Dispatcher 是否使用 polling scheduler 觸發，或由 queue job 驅動。需先做 codebase survey，取得既有 scheduler/queue 模式，再回 `blueprint-infra-queue.md` 鎖定。
 
 阻斷：Phase 3 plan
@@ -47,6 +49,8 @@ updated_by: Claude
 所在文件：[`blueprint/blueprint-payload-contract.md`](./blueprint/blueprint-payload-contract.md)、[`blueprint/blueprint-phase-4.md`](./blueprint/blueprint-phase-4.md)
 
 現況：兩份文件均明確說「不在本文件定案」，但 Phase 4 scope 包含 signing 實作，無演算法 plan 無法展開。
+
+已知補充：`signing_secret` 第一版先由服務環境變數提供預設值並寫入 subscription。這解掉 secret 初始來源，但尚未解掉簽章演算法、簽章 input 與 header 命名。
 
 需要的決策：
 - 演算法（例：HMAC-SHA256）
@@ -142,6 +146,8 @@ updated_by: Claude
 所在文件：[`blueprint/blueprint-data-model.md`](./blueprint/blueprint-data-model.md)（Signing Secret 節）
 
 現況：只說「不能只存不可逆 hash」，具體儲存方式（資料庫加密欄位、應用層 AES 加密、environment key）未決，推給 plan。
+
+已知補充：第一版 secret 值來源先採服務環境變數預設值，建立 subscription 時寫入。仍需確認寫入 DB 後的保存方式是否加密，以及 worker 讀取 secret 的邊界。
 
 需要的處置：升為 Phase 1 plan 前必決的阻斷條件。Phase 1 建立 subscription 時即需產生並儲存 secret；若到 Phase 4 才發現儲存方式不符需求，整個 signing flow 需翻修。建議在 `blueprint-data-model.md` 中標記此項為「Phase 1 plan 啟動前需查驗 codebase secret storage convention 並補回」。
 

@@ -41,6 +41,7 @@ Out of scope：
 - Event type catalog 由 migration seed 寫入，不開放 UI CRUD。
 - Subscription 建立時預設 `active = true`。
 - 第一版不開放 UI 修改 `active` 與 `signing_secret`。
+- Subscription 建立時第一版先使用服務環境變數中的預設 signing secret 寫入。
 - Subscription delete 採 soft delete。
 - Event type read model 可由 plan 依既有後台 API pattern 決定是獨立 endpoint 或併入 subscription detail。
 
@@ -78,4 +79,4 @@ merchant user
 
 - `deposit.blocked` 是否正式納入第一版 seed。
 - Event type read model 採獨立 endpoint 或併入 subscription detail。
-- `signing_secret` 建立時由服務產生，或依環境設定套用預設值。
+- `signing_secret` 是否需要加密保存仍需依 codebase secret storage convention 確認。

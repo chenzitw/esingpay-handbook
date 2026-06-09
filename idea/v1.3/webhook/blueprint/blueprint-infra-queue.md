@@ -8,7 +8,7 @@ updated_by: Codex
 
 ## Purpose
 
-本文件鎖定 webhook 第一版的 queue / scheduler / worker topology。具體 queue library、topic name exact string、consumer group、retry/backoff implementation 留給 plan 依 codebase infra convention 決定。
+本文件鎖定 webhook 第一版的 queue / scheduler / worker topology。Queue provider 採 Azure Service Bus；具體 queue/topic name、consumer 設定、資源命名與 retry/backoff implementation 留給 plan 依 codebase infra convention 決定。
 
 ## Reference Baseline
 
@@ -31,14 +31,14 @@ recovery scheduler
 
 ## Conceptual Topics
 
-Plan 需依 codebase queue convention 決定正式 topic 名稱。概念 topic 如下：
+第一版 queue provider 採 Azure Service Bus。Plan 仍需依 codebase Azure Service Bus convention 決定正式 queue/topic 名稱、consumer 設定與部署資源命名。概念 topic 如下：
 
 | Conceptual topic | Producer | Consumer | Purpose |
 | --- | --- | --- | --- |
 | `webhook.outbox.dispatch` | scheduler or dispatcher trigger | dispatcher | 觸發 pending outbox event dispatch。 |
 | `webhook.delivery.execute` | dispatcher / recovery scheduler | delivery worker | 執行某一筆 webhook delivery。 |
 
-如果 codebase 採 polling scheduler 而非 queue 觸發 dispatcher，`webhook.outbox.dispatch` 可不建立；但 delivery execution 應維持 queue-based，避免 dispatcher 同步呼叫外部 endpoint。
+如果 codebase 採 polling scheduler 而非 queue 觸發 dispatcher，`webhook.outbox.dispatch` 可不建立；但 delivery execution 應維持 Azure Service Bus queue-based，避免 dispatcher 同步呼叫外部 endpoint。
 
 ## Dispatcher Flow
 
@@ -103,5 +103,5 @@ recovery scheduler
 ## Pattern Gaps
 
 - 若 codebase 尚無 scheduler pattern，Phase 3 plan 需先 survey。
-- 若 codebase 尚無 queue topic naming convention，Phase 3 plan 需定義命名並記錄 rationale。
+- 若 codebase 尚無 Azure Service Bus queue/topic naming convention，Phase 3 plan 需定義命名並記錄 rationale。
 - 若 codebase 尚無 worker lock pattern，Phase 4 plan 需定義 delivery 狀態轉換與 atomic update 方式。
