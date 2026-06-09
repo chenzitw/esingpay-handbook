@@ -1,14 +1,14 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — Phase 2 Blueprint
+# Webhook 交易事件推播 — Stage 2 Blueprint
 
 ## Goal
 
-Phase 2 完成 withdrawal / deposit 狀態變更到 webhook outbox event 的 production flow。交易主流程只寫入 outbox event，不直接呼叫商戶 endpoint。
+Stage 2 完成 withdrawal / deposit 狀態變更到 webhook outbox event 的 production flow。交易主流程只寫入 outbox event，不直接呼叫商戶 endpoint。
 
 ## Scope
 
@@ -54,11 +54,11 @@ withdrawal / deposit status transition
 - Outbox event 保存 `merchant_id`、`correlation_type`、`correlation_identifier` 與 `payload`。
 - Event production failure 是否影響交易狀態變更 commit 需在 plan 明確決定。
 - Outbox payload 必須使用 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md) 定義的固定 envelope，`data` 依 event type 填入 withdrawal / deposit 內容。
-- Phase 2 plan 需查驗 withdrawal / deposit 欄位來源，決定 optional 欄位是否可提供。
+- Stage 2 plan 需查驗 withdrawal / deposit 欄位來源，決定 optional 欄位是否可提供。
 
 ## Validation Target
 
-Phase 2 完成時應能證明：
+Stage 2 完成時應能證明：
 
 ```text
 withdrawal / deposit status transition
@@ -71,7 +71,7 @@ withdrawal / deposit status transition
 
 - 交易狀態變更不直接呼叫 merchant endpoint。
 - 不支援或未啟用 event type 的處理語意明確。
-- Outbox event 可被 Phase 3 dispatcher 查詢。
+- Outbox event 可被 Stage 3 dispatcher 查詢。
 
 ## Estimate
 

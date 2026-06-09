@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
@@ -14,8 +14,8 @@ Known differences from the current blueprint include:
 
 - Table names here use plural or generic names such as `outbox_events`; current blueprint uses singular webhook-specific names such as `webhook_outbox_event`.
 - This reference stores event type as a string; current blueprint uses `event_id` referencing `webhook_event_type.id`.
-- This reference uses `secret` and `is_active`; current blueprint uses `signing_secret` and `active`.
-- This reference predates the open decision about `deposit.blocked`.
+- This reference uses `secret` and `is_active`; current first-version data model does not include those fields.
+- This reference predates the decision that `deposit.blocked` is included in the first-version event seed.
 
 ## Mermaid Flow
 
@@ -24,7 +24,7 @@ flowchart TB
   A([Business Service<br/>Withdrawal / Deposit])
 
   subgraph Events[Webhook Events]
-    E["withdrawal.created<br/>withdrawal.canceled<br/>withdrawal.failed<br/>withdrawal.completed<br/>deposit.created<br/>deposit.failed<br/>deposit.completed"]
+    E["withdrawal.created<br/>withdrawal.canceled<br/>withdrawal.failed<br/>withdrawal.completed<br/>deposit.created<br/>deposit.failed<br/>deposit.completed<br/>deposit.blocked"]
   end
 
   B["Insert outbox event"]

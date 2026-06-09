@@ -95,12 +95,12 @@ dispatcher
   -> create delivery without subscription-event relation check
 ```
 
-## Phase Ownership
+## Stage Ownership
 
-- Phase 1 owns subscription management and event type catalog.
-- Phase 2 owns event production and outbox persistence.
-- Phase 3 owns dispatcher and delivery creation.
-- Phase 4 owns delivery worker, signing and recovery.
+- Stage 1 owns subscription management and event type catalog.
+- Stage 2 owns event production and outbox persistence.
+- Stage 3 owns dispatcher and delivery creation.
+- Stage 4 owns delivery worker, signing and recovery.
 
 ## Open Points
 

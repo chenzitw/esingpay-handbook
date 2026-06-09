@@ -1,0 +1,53 @@
+---
+status: draft
+updated_at: 2026-06-10
+updated_by: Codex
+---
+
+# Webhook 交易事件推播 — Design
+
+## Context
+
+Webhook 讓商戶可以在後台登記 callback endpoint，接收系統主動推送的交易事件。第一版聚焦 withdrawal / deposit 相關事件，讓商戶不需要輪詢查詢 API，也能在交易狀態變更時更新自己的系統。
+
+此設計同時覆蓋兩個面向：
+
+- 商戶後台對 webhook endpoint 的觀看、登記、修改與刪除。
+- 系統內部把交易事件轉換為對外 webhook delivery 的派送流程。
+
+Webhook 派送不應綁在交易主流程內同步呼叫商戶 endpoint。交易服務只負責產生事件，後續由 webhook dispatcher、delivery worker 與 recovery scheduler 非同步處理。
+
+## Scope
+
+In scope：
+
+- 商戶可管理自己名下的 webhook subscription。
+- 商戶可為每個 webhook endpoint 選擇要接收的事件類型。
+- 系統可根據交易事件建立 webhook outbox event。
+- 系統可根據 outbox event 與 subscription 建立 delivery 任務。
+- 系統可追蹤每個 endpoint 的派送結果。
+- 系統可補償 pending 或 timeout 的 delivery 任務。
+
+Out of scope：
+
+- 事件 payload 的完整欄位 contract。
+- delivery 重試次數、退避策略與最終失敗規則。
+- 商戶手動重送 delivery 的後台功能。
+- webhook endpoint 驗證流程。
+- webhook event type 的 UI CRUD。
+
+## Design Map
+
+- [`design-domain-model.md`](./design-domain-model.md)：webhook subscription、event type、outbox event、delivery 的概念模型與 persistence principles。
+- [`design-management-surface.md`](./design-management-surface.md)：商戶後台第一版 webhook subscription 管理能力。
+- [`design-rest.md`](./design-rest.md)：merchant console 前端與後端交握的 REST request / response 草案。
+- [`design-dispatch-flow.md`](./design-dispatch-flow.md)：交易事件轉 outbox、dispatcher 建立 delivery、worker 派送與 recovery 的流程約束。
+- [`design-type-contract.md`](./design-type-contract.md)：後續 domain raw、event contract、request / response DTO 型別定義的設計入口。
+
+## Open Points
+
+- Webhook payload 的 external contract。
+- Delivery 失敗後的重試策略。
+- Outbox event 何時標記為完成處理。
+- 是否需要提供商戶查詢 delivery history。
+- 是否需要提供管理端人工重送 delivery。

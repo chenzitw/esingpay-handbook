@@ -1,21 +1,21 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — Phase 3 Blueprint
+# Webhook 交易事件推播 — Stage 3 Blueprint
 
 ## Goal
 
-Phase 3 完成 dispatcher 與 delivery creation。Dispatcher 從 pending outbox event 找出 matching subscriptions，建立 webhook delivery，並發布 delivery execution job。
+Stage 3 完成 dispatcher 與 delivery creation。Dispatcher 從 pending outbox event 找出 matching subscriptions，建立 webhook delivery，並發布 delivery execution job。
 
 ## Scope
 
 In scope：
 
 - Pending outbox event polling / dispatch trigger。
-- Active subscription matching。
+- Eligible subscription matching。
 - `NO_SUBSCRIBERS` outbox status。
 - Delivery creation。
 - Delivery job publishing。
@@ -50,14 +50,14 @@ dispatcher
 
 ## Critical Decisions
 
-- Dispatcher 查詢 subscription 時必須同時判斷 `active = true` 與 `deleted_at is null`。
+- Dispatcher 查詢 subscription 時必須排除已軟刪除資料，並確認 subscription 已訂閱目標事件。
 - Matching 必須透過 `webhook_subscription_event_type` relation，不可只用 merchant scope。
 - Delivery 需保存 endpoint 與 payload snapshot。
 - Queue publish failure 的補償方式需在 plan 明確處理。
 
 ## Validation Target
 
-Phase 3 完成時應能證明：
+Stage 3 完成時應能證明：
 
 ```text
 pending outbox event
@@ -78,7 +78,7 @@ pending outbox event
 驗證重點：
 
 - 多 subscription 訂閱同一 event 時建立多筆 delivery。
-- 已刪除或 inactive subscription 不建立 delivery。
+- 已刪除或未訂閱目標事件的 subscription 不建立 delivery。
 - Dispatcher 可重跑而不造成重複 delivery，或 plan 明確定義去重策略。
 
 ## Estimate

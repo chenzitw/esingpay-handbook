@@ -1,14 +1,14 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — Phase 4 Blueprint
+# Webhook 交易事件推播 — Stage 4 Blueprint
 
 ## Goal
 
-Phase 4 完成 delivery worker、signing 與 recovery scheduler。完成後 webhook 系統能實際 POST 到 merchant endpoint，追蹤成功/失敗，並補償卡住的 delivery。
+Stage 4 完成 delivery worker、signing 與 recovery scheduler。完成後 webhook 系統能實際 POST 到 merchant endpoint，追蹤成功/失敗，並補償卡住的 delivery。
 
 ## Scope
 
@@ -71,7 +71,7 @@ recovery scheduler
 
 ## Validation Target
 
-Phase 4 完成時應能證明：
+Stage 4 完成時應能證明：
 
 ```text
 delivery job

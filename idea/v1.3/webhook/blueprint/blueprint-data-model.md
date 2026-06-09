@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
@@ -29,26 +29,14 @@ updated_by: Codex
 
 ## Subscription State
 
-- Subscription 使用 `active` boolean，而非 enum status。
-- `active = true` 表示可被 dispatcher 查詢並建立 delivery。
-- `active = false` 表示資料保留，但不參與事件派送。
-- `active` 第一版不開放 UI 調整，建立時預設為 true。
 - 軟刪除使用 `deleted_at`，被軟刪除的 subscription 不出現在 UI 清單，也不參與派送。
-
-## Signing Secret
-
-- `signing_secret` 保存於 subscription。
-- 第一版不開放 UI 調整。
-- 建立 subscription 時第一版先由服務環境變數提供預設 signing secret 並寫入 subscription。
-- 實作 plan 需確認 secret 是否加密保存；因系統需要用它產生簽章，不能只存不可逆 hash。
-- 每個 subscription 使用獨立隨機 secret 與 rotate flow 不在第一版 scope；若後續納入，需回到 API surface 與 data model 補足。
 
 ## Event Type Catalog
 
 - `webhook_event_type` 是系統 catalog，不開放 UI CRUD。
 - Event type 資料由 migration seed 寫入。
 - UI checkbox 與後端訂閱校驗都以這份 catalog 為準。
-- `deposit.blocked` 是否納入正式 seed 需在 Phase 1 前確認。
+- `deposit.blocked` 第一版正式支援，需納入 migration seed。
 
 Seed 草稿事件：
 
@@ -73,15 +61,13 @@ Seed 草稿事件：
 
 ### `webhook_subscription`
 
-用途：記錄商戶登記的 webhook endpoint，以及該 endpoint 是否可用於接收事件推播。
+用途：記錄商戶登記的 webhook endpoint。
 
 欄位：
 
 - `id`
 - `merchant_id`
 - `endpoint_url`
-- `signing_secret`
-- `active`
 - `created_at`
 - `updated_at`
 - `deleted_at`
@@ -89,7 +75,7 @@ Seed 草稿事件：
 約束：
 
 - 同一 merchant 的未刪除 endpoint 不可重複。
-- 查詢 active subscription 時必須同時排除 deleted subscription。
+- 查詢可派送 subscription 時必須排除 deleted subscription。
 
 ### `webhook_event_type`
 
@@ -99,10 +85,6 @@ Seed 草稿事件：
 
 - `id`
 - `event_key`
-- `display_name`
-- `category`
-- `description`
-- `is_active`
 - `sort_order`
 - `created_at`
 - `updated_at`
@@ -110,7 +92,6 @@ Seed 草稿事件：
 約束：
 
 - `event_key` 必須唯一。
-- 第一版 category 至少涵蓋 withdrawal 與 deposit。
 
 ### `webhook_subscription_event_type`
 
@@ -189,9 +170,9 @@ Seed 草稿事件：
 - `payload` 保存派送當下的 payload snapshot。
 - Worker 必須透過狀態轉換鎖定 delivery，避免多 worker 重複處理同一任務。
 
-## Phase Ownership
+## Stage Ownership
 
-- Phase 1 建立 `webhook_subscription`、`webhook_event_type`、`webhook_subscription_event_type`。
-- Phase 2 建立 `webhook_outbox_event` 與 producer 所需狀態。
-- Phase 3 建立或補足 `webhook_delivery` 與 dispatcher 所需狀態轉換。
-- Phase 4 補足 delivery worker、recovery 與 signing 所需欄位；若需要 retry count 或 next retry time，需回到本文件更新 conceptual inventory。
+- Stage 1 建立 `webhook_subscription`、`webhook_event_type`、`webhook_subscription_event_type`。
+- Stage 2 建立 `webhook_outbox_event` 與 producer 所需狀態。
+- Stage 3 建立或補足 `webhook_delivery` 與 dispatcher 所需狀態轉換。
+- Stage 4 補足 delivery worker、recovery 與 signing 所需欄位；若需要 retry count 或 next retry time，需回到本文件更新 conceptual inventory。

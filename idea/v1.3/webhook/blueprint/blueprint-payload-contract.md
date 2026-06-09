@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
@@ -99,7 +99,7 @@ Notes：
 
 - `withdrawal_id` 的實際命名需與 external/public API 對外命名一致。
 - `merchant_reference` 若 withdrawal flow 沒有對應欄位，可省略。
-- Failure reason 是否放入第一版 payload 由 Phase 2 plan 依既有交易模型決定；若加入，應使用商戶可理解的穩定 code，不暴露 internal error。
+- Failure reason 是否放入第一版 payload 由 Stage 2 plan 依既有交易模型決定；若加入，應使用商戶可理解的穩定 code，不暴露 internal error。
 
 ## Deposit Event Data
 
@@ -108,7 +108,7 @@ Notes：
 - `deposit.created`
 - `deposit.failed`
 - `deposit.completed`
-- `deposit.blocked`（是否納入第一版仍是 open point）
+- `deposit.blocked`
 
 Conceptual payload：
 
@@ -141,7 +141,7 @@ Notes：
 
 - `transaction_hash` 只在鏈上資料已存在時提供。
 - `merchant_reference` 若 deposit flow 沒有對應欄位，可省略。
-- `deposit.blocked` 若納入第一版，blocked reason 是否提供需另行決定；第一版可先只提供 status。
+- `deposit.blocked` 第一版正式支援；blocked reason 是否提供需另行決定，第一版可先只提供 status。
 
 ## Versioning
 
@@ -167,9 +167,9 @@ Plan 需避免以下情況：
 
 ## Phase Ownership
 
-- Phase 2：建立 outbox payload builder，產生符合本 envelope 的 event payload snapshot。
-- Phase 3：delivery creation 將 outbox payload 複製成 delivery payload snapshot。
-- Phase 4：worker 使用 delivery payload snapshot 簽章並 POST。
+- Stage 2：建立 outbox payload builder，產生符合本 envelope 的 event payload snapshot。
+- Stage 3：delivery creation 將 outbox payload 複製成 delivery payload snapshot。
+- Stage 4：worker 使用 delivery payload snapshot 簽章並 POST。
 
 ## Open Points
 

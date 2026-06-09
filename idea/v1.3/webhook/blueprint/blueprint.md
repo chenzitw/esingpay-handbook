@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-10
 updated_by: Codex
 ---
 
@@ -8,7 +8,7 @@ updated_by: Codex
 
 ## Context
 
-本 blueprint 承接 [`../design.md`](../design.md)，把 webhook 交易事件推播拆成可落地的 phase 序列，並鎖定 plan 前需要一致的 API surface、data model、RPC surface、service architecture 與 infra queue 邊界。
+本 blueprint 承接 [`../design/design.md`](../design/design.md)，把 webhook 交易事件推播拆成可落地的 stage 序列，並鎖定 plan 前需要一致的 API surface、data model、RPC surface、service architecture 與 infra queue 邊界。
 
 Webhook 是從零建立的新服務能力，不只是既有 feature 的單點延伸。因此本 topic 的 blueprint 拆成 master file 與多份專題 blueprint：
 
@@ -38,7 +38,7 @@ In scope：
 - Internal RPC surface 與服務 ownership。
 - Queue topic 與 consumer topology。
 - Webhook POST payload 第一版 envelope。
-- Phase 拆分與初步開發估時。
+- Stage / phase 拆分與初步開發估時。
 
 Out of scope：
 
@@ -60,7 +60,7 @@ Out of scope：
 
 ## Critical Decisions
 
-跨 phase 共同決策集中於專題 blueprint：
+跨 stage 共同決策集中於專題 blueprint：
 
 - API route 與 event catalog read model 見 [`blueprint-api-surface.md`](./blueprint-api-surface.md)。
 - 資料表命名、ID/time strategy、status 與欄位 inventory 見 [`blueprint-data-model.md`](./blueprint-data-model.md)。
@@ -69,28 +69,31 @@ Out of scope：
 - Queue topic、worker topology 與 recovery 方向見 [`blueprint-infra-queue.md`](./blueprint-infra-queue.md)。
 - POST payload envelope 與 event-specific data shape 見 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md)。
 
-## Phase Breakdown
+## Stage Breakdown
 
-### Phase 1：Subscription Management And Event Catalog
+### Stage 1：Subscription Management And Event Catalog
 
 建立 webhook subscription、event type catalog、subscription-event relation 的 persistence 與商戶後台管理 API。
 
-詳細 blueprint：[`blueprint-phase-1.md`](./blueprint-phase-1.md)
+詳細 blueprint：[`blueprint-stage-1.md`](./blueprint-stage-1.md)
 
-依賴：
+Stage 1 已拆成多個 phase：
 
-- `deposit.blocked` 是否納入正式 seed 需要在此 phase 前確認。
+- Phase 1：Codebase survey and implementation boundary。
+- Phase 2：Persistence schema and event seed。
+- Phase 3：Event type read and validation capability。
+- Phase 4：Subscription REST API and merchant scope。
 
 完成後應能支援：
 
 - 商戶建立、查詢、修改、刪除 webhook subscription。
 - 後端以 `webhook_event_type` catalog 作為 UI checkbox 與訂閱校驗來源。
 
-### Phase 2：Outbox Event Production
+### Stage 2：Outbox Event Production
 
 讓 withdrawal / deposit 相關交易狀態變更寫入 webhook outbox event，不直接呼叫商戶 endpoint。
 
-詳細 blueprint：[`blueprint-phase-2.md`](./blueprint-phase-2.md)
+詳細 blueprint：[`blueprint-stage-2.md`](./blueprint-stage-2.md)
 
 依賴：
 
@@ -102,11 +105,11 @@ Out of scope：
 - Withdrawal / deposit 狀態變更時建立 outbox event。
 - 交易主流程只寫入事件，不同步派送 webhook。
 
-### Phase 3：Dispatcher And Delivery Creation
+### Stage 3：Dispatcher And Delivery Creation
 
 Dispatcher 輪詢 pending outbox event，依 merchant 與 event 找出 subscription 並建立 webhook delivery。
 
-詳細 blueprint：[`blueprint-phase-3.md`](./blueprint-phase-3.md)
+詳細 blueprint：[`blueprint-stage-3.md`](./blueprint-stage-3.md)
 
 依賴：
 
@@ -120,16 +123,16 @@ Dispatcher 輪詢 pending outbox event，依 merchant 與 event 找出 subscript
 - 有訂閱者時為每個 subscription 建立 delivery。
 - Delivery job 可被發送到 worker queue。
 
-### Phase 4：Delivery Worker, Recovery And Signing
+### Stage 4：Delivery Worker, Recovery And Signing
 
 Worker 執行 endpoint POST、更新 delivery 結果；recovery scheduler 補償 pending 或 timeout delivery。
 
-詳細 blueprint：[`blueprint-phase-4.md`](./blueprint-phase-4.md)
+詳細 blueprint：[`blueprint-stage-4.md`](./blueprint-stage-4.md)
 
 依賴：
 
 - Dispatcher 已能建立 delivery。
-- Signing secret 第一版由服務環境變數預設值寫入；保存與讀取方式已由 plan/codebase survey 確認。
+- Signing secret 來源、讀取方式與 header 命名已由 Stage 4 plan/codebase survey 確認。
 - Delivery payload snapshot 已符合 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md)。
 - Timeout 與 retry 第一版策略已決定。
 
@@ -146,7 +149,7 @@ withdrawal / deposit status transition
   -> webhook event producer
   -> webhook_outbox_event
   -> dispatcher polls pending outbox events
-  -> query active webhook_subscription by merchant_id + event_id
+  -> query eligible webhook_subscription by merchant_id + event_id
   -> create webhook_delivery per matching subscription
   -> publish delivery job
   -> delivery worker locks delivery
@@ -160,46 +163,44 @@ withdrawal / deposit status transition
 
 Dependencies：
 
-- Phase 1 必須先確定 event type seed，否則 UI checkbox 與 subscription validation 無法落地。
-- Phase 2 依賴 event type catalog，因 outbox event 需要對應正式 event ID。
-- Phase 3 依賴 subscription relation 與 outbox event。
-- Phase 4 依賴 delivery 建立流程。
+- Stage 1 必須先確定 event type seed，否則 UI checkbox 與 subscription validation 無法落地。
+- Stage 2 依賴 event type catalog，因 outbox event 需要對應正式 event ID。
+- Stage 3 依賴 subscription relation 與 outbox event。
+- Stage 4 依賴 delivery 建立流程。
 
 Parallelism：
 
-- Phase 1 的 API route 與 data model plan 可一起規劃。
-- Phase 2 可在 Phase 1 data model 穩定後與 UI 細節並行。
-- Phase 3 的 dispatcher plan 可在 queue pattern survey 完成後與 Phase 2 後段並行準備，但 implementation 應等 outbox event production 可用。
-- Phase 4 應在 delivery schema、queue topic 與狀態轉換規則穩定後展開。
+- Stage 1 內部 phase 應依 [`blueprint-stage-1.md`](./blueprint-stage-1.md) 的 sequencing 推進。
+- Stage 2 可在 Stage 1 data model 穩定後與 UI 細節並行。
+- Stage 3 的 dispatcher plan 可在 queue pattern survey 完成後與 Stage 2 後段並行準備，但 implementation 應等 outbox event production 可用。
+- Stage 4 應在 delivery schema、queue topic 與狀態轉換規則穩定後展開。
 
 ## Engineering Estimate
 
 估時以前述 blueprint、既有 codebase 複用程度，以及 AI agent 協作開發方式為前提。
 
-| Phase | 估時 | 依據 |
+| Stage | 估時 | 依據 |
 | --- | ---: | --- |
-| Phase 1 | 4 天 | 新資料模型、event seed、subscription CRUD、subscription-event relation 與商戶 scope 驗證。 |
-| Phase 2 | 3 天 | 需要接 withdrawal / deposit 狀態變更點與 payload envelope；若既有 event/hook pattern 不足，估時可能增加。 |
-| Phase 3 | 4 天 | Dispatcher polling、subscription matching、delivery creation、queue publishing 與 outbox 狀態轉換需一起驗證。 |
-| Phase 4 | 5 天 | Worker lock、HTTP POST、signature secret、timeout recovery 與失敗狀態處理未知較高。 |
+| Stage 1 | 4 天 | 新資料模型、event seed、event type read endpoint、subscription CRUD、subscription-event relation 與商戶 scope 驗證。 |
+| Stage 2 | 3 天 | 需要接 withdrawal / deposit 狀態變更點與 payload envelope；若既有 event/hook pattern 不足，估時可能增加。 |
+| Stage 3 | 4 天 | Dispatcher polling、subscription matching、delivery creation、queue publishing 與 outbox 狀態轉換需一起驗證。 |
+| Stage 4 | 5 天 | Worker lock、HTTP POST、signature secret、timeout recovery 與失敗狀態處理未知較高。 |
 
 | 範圍 | 估時 | 備註 |
 | --- | ---: | --- |
-| Phase 1-2 | 7 天 | 先建立可管理 subscription 且能產生 outbox event 的基礎。 |
-| Phase 3-4 | 9 天 | 完成完整非同步派送鏈路。 |
+| Stage 1-2 | 7 天 | 先建立可管理 subscription 且能產生 outbox event 的基礎。 |
+| Stage 3-4 | 9 天 | 完成完整非同步派送鏈路。 |
 | 整體 calendar | 約 3 週 | 若 queue / scheduler / secret handling pattern 已存在，可壓縮；若需建立新 infra convention，需額外時間。 |
 
 ## Pattern Gaps
 
 - Outbox dispatcher 與 delivery worker 若 codebase 尚無既有 pattern，plan 需先 survey queue / scheduler / worker 既有實踐。
 - Signing secret 的保存、讀取與輪替若 codebase 尚無 convention，plan 需明確列出採用方式，後續穩定後蒸餾進 guide。
-- Webhook payload 第一版 envelope 已在 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md) 定案；Phase 2 plan 仍需查驗 withdrawal / deposit 欄位來源。
-- Queue provider 第一版採 Azure Service Bus；queue/topic 命名若尚無 guide convention，Phase 3 plan 需明確記錄採用理由。
+- Webhook payload 第一版 envelope 已在 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md) 定案；Stage 2 plan 仍需查驗 withdrawal / deposit 欄位來源。
+- Queue provider 第一版採 Azure Service Bus；queue/topic 命名若尚無 guide convention，Stage 3 plan 需明確記錄採用理由。
 
 ## Open Points
 
-- `deposit.blocked` 是否正式納入第一版 seed。
-- 是否提供獨立 event type read endpoint，或併入 subscription detail response。
 - Outbox event 轉為 `DISPATCHED` 的精確時機。
 - Delivery 失敗後是否立刻 `FAILED`，或需要 `RETRYING` / retry count 等額外狀態。
 - Delivery timeout 門檻與 recovery scheduler cadence。

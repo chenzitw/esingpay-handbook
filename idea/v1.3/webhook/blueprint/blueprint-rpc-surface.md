@@ -128,12 +128,12 @@ webhook delivery worker
 - Dispatcher、worker、recovery 屬 webhook service internal orchestration。
 - 若需要 gateway 或其他服務呼叫 webhook internal capability，應走 contract-rpc，而不是直接 import webhook module internals。
 
-## Phase Ownership
+## Stage Ownership
 
-- Phase 1 不需要 producer RPC；主要是 subscription management。
-- Phase 2 決定並落地 produce webhook event capability。
-- Phase 3 需要 dispatcher 使用 subscription matching 與 delivery creation capability。
-- Phase 4 需要 delivery execution 與 recovery capability。
+- Stage 1 不需要 producer RPC；主要是 subscription management。
+- Stage 2 決定並落地 produce webhook event capability。
+- Stage 3 需要 dispatcher 使用 subscription matching 與 delivery creation capability。
+- Stage 4 需要 delivery execution 與 recovery capability。
 
 ## Open Points
 

@@ -85,23 +85,23 @@ recovery scheduler
   -> publish webhook.delivery.execute jobs
 ```
 
-第一版 recovery 只保證卡住任務可重新投入。重試次數、backoff 與人工重送不在第一版 scope，除非 Phase 4 plan 決定需要最低限度欄位支援。
+第一版 recovery 只保證卡住任務可重新投入。重試次數、backoff 與人工重送不在第一版 scope，除非 Stage 4 plan 決定需要最低限度欄位支援。
 
 ## Failure Boundaries
 
 - Merchant endpoint timeout 或 5xx 不影響交易主流程。
 - Delivery worker failure 不應遺失 delivery record。
 - Dispatcher failure 不應造成 outbox event 永久無法處理；pending outbox event 必須可被下一輪 dispatcher 拾取。
-- Queue publish failure 的補償方式需在 Phase 3 plan 明確處理。
+- Queue publish failure 的補償方式需在 Stage 3 plan 明確處理。
 
-## Phase Ownership
+## Stage Ownership
 
-- Phase 2 可先不建立 delivery queue，但 outbox event production 必須可供 dispatcher 後續處理。
-- Phase 3 建立 dispatcher 與 delivery job publishing。
-- Phase 4 建立 delivery worker 與 recovery scheduler。
+- Stage 2 可先不建立 delivery queue，但 outbox event production 必須可供 dispatcher 後續處理。
+- Stage 3 建立 dispatcher 與 delivery job publishing。
+- Stage 4 建立 delivery worker 與 recovery scheduler。
 
 ## Pattern Gaps
 
-- 若 codebase 尚無 scheduler pattern，Phase 3 plan 需先 survey。
-- 若 codebase 尚無 Azure Service Bus queue/topic naming convention，Phase 3 plan 需定義命名並記錄 rationale。
-- 若 codebase 尚無 worker lock pattern，Phase 4 plan 需定義 delivery 狀態轉換與 atomic update 方式。
+- 若 codebase 尚無 scheduler pattern，Stage 3 plan 需先 survey。
+- 若 codebase 尚無 Azure Service Bus queue/topic naming convention，Stage 3 plan 需定義命名並記錄 rationale。
+- 若 codebase 尚無 worker lock pattern，Stage 4 plan 需定義 delivery 狀態轉換與 atomic update 方式。
