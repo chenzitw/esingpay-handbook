@@ -82,9 +82,10 @@ Stage 1 已拆成多個 phase：
 - Phase 1：New service boundary and implementation convention。
 - Phase 2：Persistence schema and event catalog。
 - Phase 3：Event type read and validation capability。
-- Phase 4：Subscription REST / RPC API and merchant scope。
-- Phase 5：Merchant console frontend integration。
-- Phase 6：Stage 1 verification and tests。
+- Phase 4：Subscription read APIs and merchant scope baseline。
+- Phase 5：Subscription write APIs and transaction boundaries。
+- Phase 6：Merchant console frontend integration。
+- Phase 7：Stage 1 verification and tests。
 
 完成後應能支援：
 

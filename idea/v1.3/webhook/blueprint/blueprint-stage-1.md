@@ -138,54 +138,83 @@ merchant user
   -> invalid event key is rejected by subscription validation
 ```
 
-### Phase 4：Subscription REST / RPC API And Merchant Scope
+### Phase 4：Subscription Read APIs And Merchant Scope Baseline
 
-建立商戶可操作的 api-gateway REST API 與 webhook service management RPC。
+建立 api-gateway → webhook service RPC 的 proxy 基礎、subscription read-side APIs，以及 merchant scope 與 error mapping baseline。完成後可驗證 proxy pattern、query model 組裝與 merchant scope 是否正確，再進入 write-side。
 
 工作內容：
 
-- 實作 api-gateway `GET /webhook/merch/subscriptions` 並 proxy 到 webhook list subscriptions RPC。
-- 實作 api-gateway `POST /webhook/merch/subscriptions` 並 proxy 到 webhook create subscription RPC。
-- 實作 api-gateway `GET /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook get subscription RPC。
-- 實作 api-gateway `PUT /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook update subscription RPC。
-- 實作 api-gateway `DELETE /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook delete subscription RPC。
-- 實作 webhook service merchant scoping，商戶只能查詢與修改自己名下 subscription。
-- List 查詢必須以 `merchant_id = identity.merchantId` 篩選。
-- Get / update / delete 查詢必須同時帶入 `subscriptionId` 與 `merchant_id = identity.merchantId`，避免其他 merchant 得知 subscription id 後透過 API 讀寫資料。
-- 確認 REST request / response 與 RPC input / output 欄位對齊；gateway 僅做必要 envelope / identity 轉換。
-- 實作 validation / normalization：endpoint URL trim、eventKeys 必須是陣列但可為空且不可重複、pagination 正整數與 pageSize 上限。
-- 實作 error mapping：webhook RPC stable error code 對應 api-gateway REST status / error envelope。
-- 實作 list pagination 與預設排序 `created_at desc, id desc`。
-- Create subscription 時在同一 transaction 或等效一致性邊界內建立 `webhook_subscription` 與 `webhook_subscription_event_type` bindings。
-- Write model 應分別操作 `webhook_subscription` 本體與 `webhook_subscription_event_type` binding。
-- Query model 可為 list/detail 組裝 `eventTypeCount` 與 `eventTypes`，但不得將它們視為 subscription row 欄位。
-- Update subscription 時更新 `webhook_subscription.endpoint_url`。
-- Update event keys 時以 request 事件集合覆蓋目前 subscription-event relation：刪除既有 `webhook_subscription_event_type` rows，再 insert 新勾選的 event keys；若 request 為空陣列，刪除後不 insert。
-- Update 的 endpoint URL 更新與 binding replacement 應在同一 transaction 或等效一致性邊界內完成。
-- Delete 時採 soft delete，後續 list / get 不回傳已刪除資料。
-- Delete 不刪除 binding rows；dispatcher 需透過 subscription deleted state 排除已刪除資料。
+- 實作 api-gateway `GET /webhook/merch/subscriptions` 並 proxy 到 webhook ListSubscriptions RPC。
+- 實作 api-gateway `GET /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook GetSubscription RPC。
+- 實作 webhook service ListSubscriptions RPC：以 `merchant_id = identity.merchantId` 篩選未刪除 subscription，組裝 `eventTypeCount`，套用預設排序 `created_at desc, id desc` 與 pagination。
+- 實作 webhook service GetSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` 查詢，組裝 `eventTypes`（由 binding join code-defined catalog 依 `sortOrder` 排序），排除已刪除資料。
+- 實作 pagination validation：`page` 與 `pageSize` 正整數驗證、`pageSize` 上限、預設值。
+- 實作 subscriptionId path parameter 格式驗證。
+- 實作 merchant scope：不存在、已刪除或不屬於目前 merchant 的 subscription 一律回傳 `WEBHOOK_SUBSCRIPTION_NOT_FOUND`。
+- 建立 RPC error code → REST status / error envelope mapping baseline：`WEBHOOK_SUBSCRIPTION_NOT_FOUND`、`WEBHOOK_SUBSCRIPTION_ID_INVALID`、`WEBHOOK_PAGINATION_INVALID`、`WEBHOOK_PAGE_SIZE_EXCEEDED`。
+- 確認 `identity.merchantId` 由 api-gateway 傳入 RPC 的方式與 codebase 其他 RPC 服務一致。
+
+Validation target：
+
+```text
+merchant user
+  -> GET /webhook/merch/subscriptions
+  -> receives paginated list with eventTypeCount, sorted createdAt desc
+  -> GET /webhook/merch/subscriptions/{subscriptionId}
+  -> receives subscription detail with eventTypes sorted by sortOrder
+  -> cross-merchant subscriptionId returns WEBHOOK_SUBSCRIPTION_NOT_FOUND
+  -> malformed subscriptionId returns WEBHOOK_SUBSCRIPTION_ID_INVALID
+  -> invalid pagination params return WEBHOOK_PAGINATION_INVALID
+```
+
+驗證重點：
+
+- Merchant A 的 identity 不能取得 Merchant B 的 subscription，即使 subscriptionId 已知。
+- `eventTypeCount` 由 `webhook_subscription_event_type` binding 聚合，不是 subscription 本體欄位。
+- `eventTypes` 由 binding join code-defined catalog 組裝，並依 `sortOrder` 排序。
+
+### Phase 5：Subscription Write APIs And Transaction Boundaries
+
+完成 subscription 的寫入操作，包含 create / update / delete，以及 binding 操作的 transaction 邊界。此 phase 依賴 Phase 3 的 event key validation capability 與 Phase 4 建立的 proxy pattern 與 error mapping baseline。
+
+工作內容：
+
+- 實作 api-gateway `POST /webhook/merch/subscriptions` 並 proxy 到 webhook CreateSubscription RPC。
+- 實作 api-gateway `PUT /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook UpdateSubscription RPC。
+- 實作 api-gateway `DELETE /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook DeleteSubscription RPC。
+- 實作 webhook service CreateSubscription RPC：驗證 `endpointUrl` 與 `eventKeys`，在同一 transaction 或等效一致性邊界內建立 `webhook_subscription` 與 `webhook_subscription_event_type` rows，回傳 subscription detail。
+- 實作 webhook service UpdateSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` lookup，在同一 transaction 或等效一致性邊界內更新 `endpoint_url` 並以 delete-then-insert 替換 event bindings，回傳 subscription detail；`eventKeys` 為空陣列時刪除所有 binding rows 但保留 subscription。
+- 實作 webhook service DeleteSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` soft delete，不刪除 `webhook_subscription_event_type` rows。
+- 實作 `endpointUrl` validation：trim、不可空白、URL 格式檢查。
+- 實作 `eventKeys` validation：必須是陣列、不可重複、每個 key 必須存在於 code-defined event catalog；允許空陣列。
+- 補齊 write-side error mapping：`WEBHOOK_ENDPOINT_URL_REQUIRED`、`WEBHOOK_ENDPOINT_URL_INVALID`、`WEBHOOK_EVENT_KEYS_REQUIRED`、`WEBHOOK_EVENT_KEYS_DUPLICATED`、`WEBHOOK_EVENT_KEY_UNSUPPORTED`、`WEBHOOK_SUBSCRIPTION_OPERATION_FAILED`。
+- 確認 create 的 subscription + binding insert 在同一 consistency boundary 內完成。
+- 確認 update 的 endpoint URL 更新與 binding replacement 在同一 transaction 內完成，避免半完成狀態。
 
 Validation target：
 
 ```text
 merchant user
   -> create webhook subscription with endpointUrl + eventKeys
-  -> list subscriptions
-  -> get subscription detail
+  -> receives detail with sorted eventTypes
   -> update endpointUrl and eventKeys
+  -> binding rows reflect new eventKeys only
+  -> update with empty eventKeys removes all bindings, keeps subscription
   -> soft delete subscription
-  -> deleted subscription disappears from list
+  -> deleted subscription disappears from list and get
+  -> invalid endpointUrl or eventKeys rejected with stable error code
 ```
 
 驗證重點：
 
-- Merchant A 不能讀寫 Merchant B 的 subscription。
-- 已知其他 merchant 的 `subscriptionId` 仍不能 get / update / delete 該 subscription。
-- Event keys 必須來自 backend code-defined catalog。
+- Create 與 binding insert 在同一 consistency boundary 內完成。
+- Update 的 binding replacement（delete + insert）在同一 transaction 內完成。
+- Soft delete 後 subscription 不出現在 list / get，也不會被後續 dispatcher 使用。
+- Soft delete 不刪除 `webhook_subscription_event_type` rows。
 - 同一 merchant 可建立多筆相同 endpoint URL 的 subscription。
-- Deleted subscription 不出現在 UI list，也不會被後續 dispatcher 使用。
+- Event keys 必須來自 backend code-defined catalog。
 
-### Phase 5：Merchant Console Frontend Integration
+### Phase 6：Merchant Console Frontend Integration
 
 串接 merchant console 的 webhook subscription management UI。此 phase 只負責第一版功能串接，不展開完整視覺設計或 delivery history。
 
@@ -211,7 +240,7 @@ merchant console user
   -> list reflects latest backend state
 ```
 
-### Phase 6：Stage 1 Verification And Tests
+### Phase 7：Stage 1 Verification And Tests
 
 補齊 Stage 1 backend / frontend 驗證，確保 subscription management 能作為 Stage 2-4 的穩定基礎。
 
@@ -257,11 +286,11 @@ stage 1 verification
 ## Sequencing
 
 - Phase 1 先完成，避免 schema、route、module 與 frontend 串接邊界在 plan 期間反覆改動。
-- Phase 2 是 Phase 3 / Phase 4 的前提，因 read endpoint 與 subscription validation 都依賴 code-defined event type catalog。
-- Phase 3 可在 Phase 2 migration plan 穩定後開始。
-- Phase 4 可與 Phase 3 後段並行，但 create / update validation 需共用 Phase 3 的 event key validation capability。
-- Phase 5 依賴 Phase 3 event type endpoint 與 Phase 4 subscription REST / RPC contract；若 DTO 已穩定，可先以 mock API 或 stub data 開始 UI 串接。
-- Phase 6 在 Phase 4 / Phase 5 完成後收斂，也可於各 phase 實作期間同步補測試，最後集中驗收 Stage 1 行為。
+- Phase 2 是 Phase 3 / Phase 4 的前提，因 code-defined event type catalog 與 subscription schema 都需先建立。
+- Phase 3 與 Phase 4 可在 Phase 2 穩定後並行：Phase 4 read-side 不依賴 event key validation capability；Phase 3 的 event key validation helper 是 Phase 5 write-side 的前提。
+- Phase 5 依賴 Phase 3（event key validation）與 Phase 4（proxy pattern 與 error mapping baseline）。
+- Phase 6 依賴 Phase 3 event type endpoint 與 Phase 4 / Phase 5 subscription REST / RPC contract；若 DTO 已穩定，可先以 mock API 或 stub data 開始 UI 串接。
+- Phase 7 在 Phase 5 / Phase 6 完成後收斂，也可於各 phase 實作期間同步補測試，最後集中驗收 Stage 1 行為。
 
 ## Estimate
 
@@ -270,9 +299,10 @@ stage 1 verification
 | Phase 1 | 0.5 天 | 決定新服務 backend/frontend boundary、migration、event catalog module、merchant scoping 與 soft delete convention。 |
 | Phase 2 | 0.75 天 | 兩張表、code-defined event catalog、relation 約束；不建立 event type table 與 endpoint unique constraint。 |
 | Phase 3 | 0.75 天 | Event type read endpoint 與 event key validation capability。 |
-| Phase 4 | 2 天 | Api-gateway REST proxy、webhook management RPC、relation replacement、merchant scope、soft delete 與 error handling。 |
-| Phase 5 | 1 天 | Merchant console API client、list/detail/form/checkbox 串接與基本錯誤顯示。 |
-| Phase 6 | 1 天 | Backend API/integration tests、frontend smoke path 與 Stage 1 驗收。 |
+| Phase 4 | 0.75 天 | Api-gateway REST proxy 基礎、subscription read-side RPC（list/get）、query model 組裝、merchant scope 與 error mapping baseline。 |
+| Phase 5 | 1.25 天 | Subscription write-side RPC（create/update/delete）、binding transaction 邊界、write validation 與 error mapping。 |
+| Phase 6 | 1 天 | Merchant console API client、list/detail/form/checkbox 串接與基本錯誤顯示。 |
+| Phase 7 | 1 天 | Backend API/integration tests、frontend smoke path 與 Stage 1 驗收。 |
 
 總估時：6 天。
 
