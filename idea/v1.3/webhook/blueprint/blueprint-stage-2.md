@@ -17,7 +17,7 @@ In scope：
 - `webhook_outbox_event` persistence。
 - Produce webhook event capability。
 - Withdrawal / deposit 狀態變更點接入。
-- Event key 到 event type catalog 的解析。
+- Event key 到 code-defined event type catalog 的解析。
 - Payload snapshot 寫入 outbox event。
 
 Out of scope：
@@ -30,10 +30,10 @@ Out of scope：
 
 ## Inputs
 
-- Data model：[`blueprint-data-model.md`](./blueprint-data-model.md)。
-- RPC surface：[`blueprint-rpc-surface.md`](./blueprint-rpc-surface.md)。
-- Service architecture：[`blueprint-service-architecture.md`](./blueprint-service-architecture.md)。
-- Payload contract：[`blueprint-payload-contract.md`](./blueprint-payload-contract.md)。
+- Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
+- RPC surface：[`../design/design-rpc.md`](../design/design-rpc.md)。
+- Service boundary：[`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
+- Payload contract：[`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
 
 ## Event Production
 
@@ -42,7 +42,7 @@ Withdrawal / deposit 服務在交易狀態變更時建立 webhook outbox event�
 ```text
 withdrawal / deposit status transition
   -> produce webhook event
-  -> resolve event_key to webhook_event_type
+  -> validate event_key against code-defined event type catalog
   -> persist webhook_outbox_event PENDING
 ```
 
@@ -50,10 +50,10 @@ withdrawal / deposit status transition
 
 ## Critical Decisions
 
-- Outbox event 使用 `event_id` 對應 `webhook_event_type.id`。
-- Outbox event 保存 `merchant_id`、`correlation_type`、`correlation_identifier` 與 `payload`。
+- Outbox event 使用 `event_type` 保存 event key 字串。
+- Outbox event 保存 `merchant_id`、`resource_type`、`resource_identifier` 與 `payload`。
 - Event production failure 是否影響交易狀態變更 commit 需在 plan 明確決定。
-- Outbox payload 必須使用 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md) 定義的固定 envelope，`data` 依 event type 填入 withdrawal / deposit 內容。
+- Outbox payload 必須使用 [`../design/design-payload-contract.md`](../design/design-payload-contract.md) 定義的固定 envelope，`data` 依 event type 填入 withdrawal / deposit 內容。
 - Stage 2 plan 需查驗 withdrawal / deposit 欄位來源，決定 optional 欄位是否可提供。
 
 ## Validation Target
@@ -63,14 +63,14 @@ Stage 2 完成時應能證明：
 ```text
 withdrawal / deposit status transition
   -> webhook_outbox_event created with PENDING status
-  -> event_id references webhook_event_type
+  -> event_type stores a code-defined event key
   -> payload snapshot is persisted
 ```
 
 驗證重點：
 
 - 交易狀態變更不直接呼叫 merchant endpoint。
-- 不支援或未啟用 event type 的處理語意明確。
+- 不支援或未啟用 event key 的處理語意明確。
 - Outbox event 可被 Stage 3 dispatcher 查詢。
 
 ## Estimate

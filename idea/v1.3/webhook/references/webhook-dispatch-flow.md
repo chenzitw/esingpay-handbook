@@ -8,14 +8,16 @@ updated_by: Codex
 
 This reference preserves an early Mermaid baseline for the webhook dispatcher, delivery worker, and recovery flow.
 
-It is not the current source of truth for naming or schema details. Current decisions in [`../blueprint/blueprint.md`](../blueprint/blueprint.md), [`../blueprint/blueprint-data-model.md`](../blueprint/blueprint-data-model.md), and [`../blueprint/blueprint-infra-queue.md`](../blueprint/blueprint-infra-queue.md) override this reference.
+It is not the current source of truth for naming or schema details. Current decisions in [`../blueprint/blueprint.md`](../blueprint/blueprint.md), [`../design/design-persistence-model.md`](../design/design-persistence-model.md), and [`../design/design-queue-topology.md`](../design/design-queue-topology.md) override this reference.
 
 Known differences from the current blueprint include:
 
 - Table names here use plural or generic names such as `outbox_events`; current blueprint uses singular webhook-specific names such as `webhook_outbox_event`.
-- This reference stores event type as a string; current blueprint uses `event_id` referencing `webhook_event_type.id`.
+- Current blueprint also stores event type as a string in `event_type`; there is no `webhook_event_type` DB table.
+- This reference uses `aggregate_type` / `aggregate_id`; current blueprint uses `resource_type` / `resource_identifier`.
+- This reference uses `NO_SUBSCRIBERS` and `FAILED` as outbox statuses; current blueprint only keeps `PENDING` / `DISPATCHED` for outbox dispatcher state.
 - This reference uses `secret` and `is_active`; current first-version data model does not include those fields.
-- This reference predates the decision that `deposit.blocked` is included in the first-version event seed.
+- Current first-version event catalog includes `deposit.blocked`.
 
 ## Mermaid Flow
 

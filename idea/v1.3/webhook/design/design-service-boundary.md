@@ -4,7 +4,7 @@ updated_at: 2026-06-09
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — Service Architecture Blueprint
+# Webhook 交易事件推播 — Service Boundary Design
 
 ## Purpose
 
@@ -15,7 +15,7 @@ updated_by: Codex
 Webhook capability owns：
 
 - Webhook subscription lifecycle。
-- Webhook event type catalog。
+- Code-defined webhook event type catalog。
 - Webhook outbox event persistence。
 - Webhook delivery persistence and state transitions。
 - Dispatcher / worker / recovery orchestration。
@@ -34,8 +34,9 @@ Withdrawal / deposit capability owns：
 
 ## Domain Vocabulary
 
-- `webhook_subscription`：商戶登記的一個 callback endpoint 與訂閱事件集合。
-- `webhook_event_type`：系統支援的 webhook event catalog item。
+- `webhook_subscription`：商戶登記的一個 callback endpoint 本體。
+- `webhook_subscription_event_type`：subscription 訂閱 event key 的 binding。
+- `webhook event type catalog`：系統支援的 webhook event key 清單，由 TypeScript 檔案定義，不建 DB table。
 - `webhook_outbox_event`：內部交易事件轉換後、等待 webhook dispatcher 處理的 outbox record。
 - `webhook_delivery`：某 outbox event 對某 subscription endpoint 的派送任務與結果。
 - `dispatcher`：處理 outbox event，建立 delivery。
@@ -47,7 +48,7 @@ Withdrawal / deposit capability owns：
 概念上可切成以下 capability：
 
 - Subscription management：create / list / get / update / delete subscription。
-- Event type catalog：seeded catalog query and validation。
+- Event type catalog：code-defined catalog query and validation。
 - Event production：withdrawal / deposit 狀態變更時建立 outbox event。
 - Dispatching：pending outbox event matching subscriptions and creating deliveries。
 - Delivery execution：locking delivery, signing payload, POST endpoint, updating result。
@@ -61,8 +62,8 @@ Plan 可依 codebase 現有 module convention 決定是否拆成多個 module。
 - Dispatcher 不重新組 event payload；它使用 outbox event payload snapshot。
 - Delivery worker 不重新查 subscription 的 current endpoint 作為發送目標；它使用 delivery endpoint snapshot。
 - Subscription management 不處理 delivery execution。
-- Event type catalog 是系統設定資料，不由商戶 UI CRUD。
-- Signing secret 可由 subscription management 建立，但 delivery worker 使用它簽章；若 secret storage 需解密，plan 需定義讀取邊界。
+- Event type catalog 是系統設定資料，由 TypeScript 檔案定義，不由商戶 UI CRUD，也不建 DB table。
+- 第一版 signing secret 由環境變數提供統一預設值，不屬於 subscription management；delivery worker 使用該 secret 簽章。
 
 ## Anti-Patterns
 
@@ -95,7 +96,7 @@ dispatcher
   -> create delivery without subscription-event relation check
 ```
 
-## Stage Ownership
+## Stage Relationship
 
 - Stage 1 owns subscription management and event type catalog.
 - Stage 2 owns event production and outbox persistence.

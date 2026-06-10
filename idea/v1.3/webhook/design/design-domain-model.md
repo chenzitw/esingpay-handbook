@@ -16,18 +16,19 @@ Domain object 不等同於 DB table，也不等同於 API DTO。本文只描述�
 
 | Domain object | 代表概念 | Persistence backing |
 | --- | --- | --- |
-| `WebhookSubscription` | 商戶登記的一個 callback endpoint，以及它訂閱哪些事件。 | `webhook_subscription` + `webhook_subscription_event_type` |
-| `WebhookEventType` | 系統正式支援且可被訂閱的 webhook event catalog item。 | `webhook_event_type` |
+| `WebhookSubscription` | 商戶登記的一個 callback endpoint 本體。 | `webhook_subscription` |
+| `WebhookSubscriptionEventBinding` | 某個 subscription 訂閱了某個 event key 的關係。 | `webhook_subscription_event_type` |
+| `WebhookEventType` | 系統正式支援且可被訂閱的 webhook event catalog item。 | TypeScript code-defined catalog |
 | `WebhookOutboxEvent` | 交易服務已產生、等待 webhook 系統處理的一筆事件紀錄。 | `webhook_outbox_event` |
 | `WebhookDelivery` | 某一筆 outbox event 對某個 subscription endpoint 的實際派送任務。 | `webhook_delivery` |
 
 ## Webhook Subscription
 
-Webhook subscription 表示商戶登記的一個 callback endpoint，以及該 endpoint 訂閱哪些 webhook event type。
+Webhook subscription 表示商戶登記的一個 callback endpoint 本體。
 
 Subscription 是商戶維度的資料。商戶只能看到與管理自己的 subscription。被軟刪除的 subscription 不出現在 UI 清單，也不參與後續事件派送。
 
-第一版 subscription 的可編輯範圍以 UI 需求為準：商戶可建立 endpoint、修改 endpoint 與調整訂閱事件。
+第一版 subscription 的可編輯範圍以 UI 需求為準：商戶可建立 endpoint、修改 endpoint，並透過 binding 調整訂閱事件。
 
 Conceptual properties：
 
@@ -36,16 +37,16 @@ Conceptual properties：
 | `id` | Subscription 識別碼。 |
 | `merchantId` | 擁有此 subscription 的商戶識別碼。 |
 | `endpointUrl` | 商戶接收 webhook POST 的 callback URL。 |
-| `eventTypes` | 此 subscription 訂閱的 webhook event type 集合。 |
 | `createdAt` | Subscription 建立時間。 |
 | `updatedAt` | Subscription 最後更新時間。 |
 | `deletedAt` | 軟刪除時間；有值時不出現在 UI，也不參與派送。 |
 
 Domain rules：
 
-- 同一 merchant 的未刪除 endpoint 不應重複。
+- 同一 merchant 可建立多筆相同 endpoint URL 的 subscription；第一版不以 merchant + endpoint URL 做唯一性限制。
 - Subscription 是否可參與派送由「未刪除且訂閱目標事件」判斷。
 - 修改 endpoint 或訂閱事件只影響後續派送，不應改寫既有 delivery snapshot。
+- `eventTypes` 不屬於 `WebhookSubscription` 本體欄位；它是由 binding 與 event catalog 組裝出的 management read model。
 
 ### Webhook Subscription Event Binding
 
@@ -58,13 +59,43 @@ Conceptual properties：
 | Property | 代表意義 |
 | --- | --- |
 | `subscriptionId` | 訂閱關係所屬的 webhook subscription。 |
-| `eventTypeId` | 被訂閱的 webhook event type。 |
+| `eventType` | 被訂閱的 webhook event key，例如 `withdrawal.completed`。 |
 | `createdAt` | 訂閱關係建立時間。 |
 
 Domain rules：
 
 - 同一 subscription 不可重複訂閱同一 event type。
-- 建立或更新 subscription 時，後端需確認 event type 存在於系統 catalog。
+- 建立或更新 subscription 時，後端需確認 event type 存在於 code-defined event catalog。
+
+## Subscription Management Read Models
+
+Subscription management API 可以回傳為 UI 方便組裝的 read model，但 read model 不等同於 domain object。
+
+`WebhookSubscriptionSummary` 用於列表，概念欄位包含：
+
+| Property | 代表意義 |
+| --- | --- |
+| `id` | Subscription 識別碼。 |
+| `endpointUrl` | Callback URL。 |
+| `eventTypeCount` | 此 subscription 目前訂閱事件數量，由 binding 聚合得出。 |
+| `createdAt` | Subscription 建立時間。 |
+| `updatedAt` | Subscription 最後更新時間。 |
+
+`WebhookSubscriptionDetail` 用於建立、查詢與更新後的 response，概念欄位包含：
+
+| Property | 代表意義 |
+| --- | --- |
+| `id` | Subscription 識別碼。 |
+| `endpointUrl` | Callback URL。 |
+| `eventTypes` | 已訂閱 event options，由 binding join code-defined event catalog 組裝。 |
+| `createdAt` | Subscription 建立時間。 |
+| `updatedAt` | Subscription 最後更新時間。 |
+
+Read model rules：
+
+- Write model 操作 `WebhookSubscription` 與 `WebhookSubscriptionEventBinding`。
+- Query model 可以為 REST / RPC response 組裝 `eventTypeCount` 或 `eventTypes`。
+- Dispatcher matching 不依賴 subscription 物件內含 event list，而是查詢 `webhook_subscription_event_type` relation。
 
 ## Webhook Event Type
 
@@ -76,17 +107,14 @@ Webhook event type 是系統支援的事件類型目錄，例如 withdrawal comp
 - 後端驗證商戶送出的訂閱事件是否有效。
 - Dispatcher 判斷 outbox event 對應哪些 subscription。
 
-Webhook event type 目前不開放 UI CRUD。資料由 migration seed 預先寫入，服務啟動後視為系統設定資料。
+Webhook event type 目前不開放 UI CRUD，也不建 DB table。第一版由 TypeScript 檔案定義固定 catalog，服務啟動後視為系統設定資料。
 
 Conceptual properties：
 
 | Property | 代表意義 |
 | --- | --- |
-| `id` | Event type 識別碼。 |
 | `eventKey` | 穩定事件 key，例如 `withdrawal.completed`。 |
 | `sortOrder` | UI 顯示或 catalog 排序用的順序值。 |
-| `createdAt` | Catalog item 建立時間。 |
-| `updatedAt` | Catalog item 最後更新時間。 |
 
 Domain rules：
 
@@ -105,7 +133,7 @@ Domain rules：
 - `deposit.completed`
 - `deposit.blocked`
 
-`deposit.blocked` 第一版正式支援，需納入 event type seed 與訂閱選項。
+`deposit.blocked` 第一版正式支援，需納入 code-defined catalog 與訂閱選項。
 
 ## Webhook Outbox Event
 
@@ -113,21 +141,21 @@ Webhook outbox event 是 webhook 系統的事件時間序紀錄。它表示系�
 
 Outbox event 的重點是「發生了什麼事件」，例如某筆 withdrawal completed。它保存事件本身、來源關聯與處理狀態，讓 webhook dispatcher 可以非同步處理，不阻塞原本的交易流程。
 
-Outbox event 使用既有服務慣例的 correlation 命名來追蹤來源資料：
+Outbox event 使用 resource 命名來追蹤來源資料：
 
-- `correlation_type` 表示來源類型，例如 deposit 或 withdrawal。
-- `correlation_identifier` 表示來源資料的識別值。
+- `resource_type` 表示來源類型，例如 deposit 或 withdrawal。
+- `resource_identifier` 表示來源資料的識別值。
 
-Outbox event 的事件類型對應 webhook event type。若沒有任何 subscription 訂閱該事件，outbox event 仍保留紀錄，並標示為沒有訂閱者。
+Outbox event 的事件類型保存為 event key 字串。若沒有任何 subscription 訂閱該事件，outbox event 仍保留紀錄；dispatcher 完成處理後以 `DISPATCHED` 表示已處理，不再另外使用沒有訂閱者狀態。
 
 Conceptual properties：
 
 | Property | 代表意義 |
 | --- | --- |
 | `id` | Outbox event 識別碼。 |
-| `eventType` | 此事件對應的 webhook event type。 |
-| `correlationType` | 來源交易資料類型，例如 deposit 或 withdrawal。 |
-| `correlationIdentifier` | 來源交易資料識別值。 |
+| `eventType` | 此事件對應的 webhook event key。 |
+| `resourceType` | 來源交易資料類型，例如 deposit 或 withdrawal。 |
+| `resourceIdentifier` | 來源交易資料識別值。 |
 | `merchantId` | 此事件所屬商戶。 |
 | `payload` | 待派送事件內容。第一版具體 external contract 另行定義。 |
 | `status` | Dispatcher 對此 outbox event 的處理狀態。 |
@@ -137,15 +165,14 @@ Conceptual properties：
 Status：
 
 - `PENDING`：事件已建立，尚未被 dispatcher 完成處理。
-- `DISPATCHED`：事件已完成 dispatcher 處理，且已建立對應 delivery。
-- `FAILED`：Dispatcher 處理失敗，需要後續補償或人工觀察。
-- `NO_SUBSCRIBERS`：事件存在，但沒有任何 subscription 需要接收。
+- `DISPATCHED`：事件已完成 dispatcher 處理；可能已建立 delivery，也可能因沒有訂閱者而未建立 delivery。
 
 Domain rules：
 
 - Outbox event 代表交易事件已發生，不代表 webhook 已送達商戶 endpoint。
 - Outbox event 不直接呼叫商戶 endpoint，只作為 dispatcher 的處理來源。
-- 沒有訂閱者時仍保留 outbox event，並以狀態表達結果。
+- Dispatcher 未完成或處理失敗時，outbox event 維持 `PENDING`，由下一輪 dispatcher 重試。
+- 沒有訂閱者時仍保留 outbox event，dispatcher 完成 matching 後標記為 `DISPATCHED`。
 
 ## Webhook Delivery
 
@@ -195,8 +222,7 @@ Domain rules：
 | 資料表 | 用途 |
 | ------ | ---- |
 | `webhook_subscription` | 記錄商戶登記的 webhook endpoint。 |
-| `webhook_event_type` | 記錄系統支援的 webhook 事件類型，供 UI checkbox 顯示與後端事件校驗使用。 |
-| `webhook_subscription_event_type` | 記錄某個 webhook subscription 訂閱了哪些事件類型。 |
+| `webhook_subscription_event_type` | 記錄某個 webhook subscription 訂閱了哪些 event key。 |
 | `webhook_outbox_event` | 記錄業務服務已產生、等待 webhook dispatcher 處理的一筆交易事件。 |
 | `webhook_delivery` | 記錄某一筆 outbox event 對某一個 subscription endpoint 的實際推播任務與結果。 |
 
@@ -206,7 +232,7 @@ Persistence 設計原則：
 - `merchant_id` 維持既有 UUID 字串設計。
 - 時間欄位使用具時區語意的 timestamp。
 - 軟刪除 subscription 後，不應阻擋商戶用相同 endpoint 重新建立新的 subscription。
-- Subscription endpoint 在同一 merchant 的有效資料內需保持唯一。
+- Subscription endpoint 在同一 merchant 內允許重複。
 - Delivery 需能在不依賴 subscription 現況的情況下還原派送當下資訊。
 
 具體欄位型別、索引、FK 與 migration 細節留給 blueprint 或 plan。

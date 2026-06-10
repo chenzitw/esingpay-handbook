@@ -31,10 +31,10 @@ Out of scope：
 
 ## Inputs
 
-- Data model：[`blueprint-data-model.md`](./blueprint-data-model.md)。
-- Service architecture：[`blueprint-service-architecture.md`](./blueprint-service-architecture.md)。
-- Infra queue：[`blueprint-infra-queue.md`](./blueprint-infra-queue.md)。
-- Payload contract：[`blueprint-payload-contract.md`](./blueprint-payload-contract.md)。
+- Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
+- Service boundary：[`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
+- Queue topology：[`../design/design-queue-topology.md`](../design/design-queue-topology.md)。
+- Payload contract：[`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
 
 ## Worker Flow
 
@@ -66,7 +66,7 @@ recovery scheduler
 - HTTP 2xx 視為 success；非 2xx、timeout 或 transport error 視為 failed。
 - 第一版若未導入 retry count，recovery 應只補償卡住任務，不做無限重試語意。
 - Signing secret 不能只存不可逆 hash，因 worker 需要用它產生簽章。
-- Worker POST 的 JSON body 必須使用 delivery payload snapshot，且符合 [`blueprint-payload-contract.md`](./blueprint-payload-contract.md)。
+- Worker POST 的 JSON body 必須使用 delivery payload snapshot，且符合 [`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
 - 簽章 input 應以實際送出的 JSON body 為準，避免簽章 payload 與 POST body 不一致。
 
 ## Validation Target

@@ -4,7 +4,7 @@ updated_at: 2026-06-10
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — Payload Contract Blueprint
+# Webhook 交易事件推播 — Payload Contract Design
 
 ## Purpose
 
@@ -165,7 +165,7 @@ Plan 需避免以下情況：
 - 簽章時使用一份 payload，實際 POST 時又重新序列化成不同內容。
 - Worker 發送前重新查交易現況組 payload，造成 delivery payload 與 outbox event 發生時間不一致。
 
-## Phase Ownership
+## Stage Relationship
 
 - Stage 2：建立 outbox payload builder，產生符合本 envelope 的 event payload snapshot。
 - Stage 3：delivery creation 將 outbox payload 複製成 delivery payload snapshot。

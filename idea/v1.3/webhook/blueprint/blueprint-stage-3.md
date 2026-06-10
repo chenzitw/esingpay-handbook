@@ -16,7 +16,7 @@ In scope：
 
 - Pending outbox event polling / dispatch trigger。
 - Eligible subscription matching。
-- `NO_SUBSCRIBERS` outbox status。
+- No-subscriber dispatch handling。
 - Delivery creation。
 - Delivery job publishing。
 - Outbox event dispatch status transition。
@@ -30,18 +30,18 @@ Out of scope：
 
 ## Inputs
 
-- Data model：[`blueprint-data-model.md`](./blueprint-data-model.md)。
-- RPC surface：[`blueprint-rpc-surface.md`](./blueprint-rpc-surface.md)。
-- Infra queue：[`blueprint-infra-queue.md`](./blueprint-infra-queue.md)。
+- Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
+- RPC surface：[`../design/design-rpc.md`](../design/design-rpc.md)。
+- Queue topology：[`../design/design-queue-topology.md`](../design/design-queue-topology.md)。
 
 ## Dispatch Flow
 
 ```text
 dispatcher
   -> fetch pending webhook_outbox_event batch
-  -> query active, non-deleted subscription by merchant_id + event_id
+  -> query active, non-deleted subscription by merchant_id + event_type
   -> if none:
-       mark outbox event NO_SUBSCRIBERS
+       mark outbox event DISPATCHED
      else:
        create webhook_delivery per subscription
        publish webhook.delivery.execute job per delivery
@@ -50,10 +50,11 @@ dispatcher
 
 ## Critical Decisions
 
-- Dispatcher 查詢 subscription 時必須排除已軟刪除資料，並確認 subscription 已訂閱目標事件。
+- Dispatcher 查詢 subscription 時必須排除已軟刪除資料，並確認 subscription 已訂閱 outbox event 的 `event_type`。
 - Matching 必須透過 `webhook_subscription_event_type` relation，不可只用 merchant scope。
 - Delivery 需保存 endpoint 與 payload snapshot。
 - Queue publish failure 的補償方式需在 plan 明確處理。
+- Outbox event status 只保留 `PENDING` / `DISPATCHED`；沒有訂閱者時同樣標記 `DISPATCHED`，不使用獨立 no-subscriber outbox status。
 
 ## Validation Target
 
@@ -62,7 +63,8 @@ Stage 3 完成時應能證明：
 ```text
 pending outbox event
   -> no matching subscription
-  -> outbox event NO_SUBSCRIBERS
+  -> no delivery rows created
+  -> outbox event DISPATCHED
 ```
 
 以及：
