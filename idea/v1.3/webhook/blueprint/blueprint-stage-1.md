@@ -96,7 +96,7 @@ Validation target：
 - 建立 `webhook_subscription_event_type`。
 - 在 TypeScript 檔案定義第一版 event type catalog：
   - `withdrawal.created`
-  - `withdrawal.canceled`
+  - `withdrawal.cancelled`
   - `withdrawal.failed`
   - `withdrawal.completed`
   - `deposit.created`

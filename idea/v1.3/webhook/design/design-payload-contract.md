@@ -66,7 +66,7 @@ updated_by: Codex
 適用事件：
 
 - `withdrawal.created`
-- `withdrawal.canceled`
+- `withdrawal.cancelled`
 - `withdrawal.failed`
 - `withdrawal.completed`
 

@@ -63,14 +63,14 @@ Conceptual fields：
 | `updatedAt` | yes | Withdrawal 最後更新時間；通常作為 event occurred time 的候選來源。 |
 | `failureCode` | no | 穩定、可對外理解的失敗代碼；僅 failed 類事件可能提供。 |
 | `failureReason` | no | 可對外揭露的失敗描述；是否納入第一版 payload 待定。 |
-| `canceledReason` | no | 可對外揭露的取消描述；是否納入第一版 payload 待定。 |
+| `cancelledReason` | no | 可對外揭露的取消描述；是否納入第一版 payload 待定。 |
 
 第一版 withdrawal event keys：
 
 | Event key | Domain raw family | Expected status meaning | `resource_type` |
 | --- | --- | --- | --- |
 | `withdrawal.created` | `WithdrawalWebhookDomainRaw` | withdrawal 已建立。 | `withdrawal` |
-| `withdrawal.canceled` | `WithdrawalWebhookDomainRaw` | withdrawal 已取消。 | `withdrawal` |
+| `withdrawal.cancelled` | `WithdrawalWebhookDomainRaw` | withdrawal 已取消。 | `withdrawal` |
 | `withdrawal.failed` | `WithdrawalWebhookDomainRaw` | withdrawal 已失敗。 | `withdrawal` |
 | `withdrawal.completed` | `WithdrawalWebhookDomainRaw` | withdrawal 已完成。 | `withdrawal` |
 
@@ -202,5 +202,5 @@ UI 顯示文字第一版直接使用 `eventKey`；`sortOrder` 只供前端排序
 - External event contract 是否需要與 external API DTO 共用命名與 primitive type。
 - Management DTO 是否只服務 merchant console，或也會被 external API 文件引用。
 - Delivery internal DTO 是否需要獨立於 persistence entity 定義。
-- Failure / blocked / canceled reason 是否納入第一版 external payload。
+- Failure / blocked / cancelled reason 是否納入第一版 external payload。
 - `occurred_at` 應使用交易狀態變更時間、交易 `updatedAt`，或 outbox event 建立時間。

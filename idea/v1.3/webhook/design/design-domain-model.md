@@ -125,7 +125,7 @@ Domain rules：
 目前事件清單草稿：
 
 - `withdrawal.created`
-- `withdrawal.canceled`
+- `withdrawal.cancelled`
 - `withdrawal.failed`
 - `withdrawal.completed`
 - `deposit.created`

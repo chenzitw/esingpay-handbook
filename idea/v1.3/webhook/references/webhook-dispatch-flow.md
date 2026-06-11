@@ -26,7 +26,7 @@ flowchart TB
   A([Business Service<br/>Withdrawal / Deposit])
 
   subgraph Events[Webhook Events]
-    E["withdrawal.created<br/>withdrawal.canceled<br/>withdrawal.failed<br/>withdrawal.completed<br/>deposit.created<br/>deposit.failed<br/>deposit.completed<br/>deposit.blocked"]
+    E["withdrawal.created<br/>withdrawal.cancelled<br/>withdrawal.failed<br/>withdrawal.completed<br/>deposit.created<br/>deposit.failed<br/>deposit.completed<br/>deposit.blocked"]
   end
 
   B["Insert outbox event"]
@@ -96,7 +96,7 @@ flowchart TB
 ## Event Types
 
 - `withdrawal.created`
-- `withdrawal.canceled`
+- `withdrawal.cancelled`
 - `withdrawal.failed`
 - `withdrawal.completed`
 - `deposit.created`

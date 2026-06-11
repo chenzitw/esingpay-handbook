@@ -140,7 +140,7 @@ Response：
 第一版支援事件：
 
 - `withdrawal.created`
-- `withdrawal.canceled`
+- `withdrawal.cancelled`
 - `withdrawal.failed`
 - `withdrawal.completed`
 - `deposit.created`

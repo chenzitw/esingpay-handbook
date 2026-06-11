@@ -42,7 +42,7 @@ updated_by: Codex
 Catalog 草稿事件：
 
 - `withdrawal.created`
-- `withdrawal.canceled`
+- `withdrawal.cancelled`
 - `withdrawal.failed`
 - `withdrawal.completed`
 - `deposit.created`
