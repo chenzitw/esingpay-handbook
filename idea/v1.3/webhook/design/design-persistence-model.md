@@ -35,20 +35,22 @@ updated_by: Codex
 ## Event Type Catalog
 
 - Webhook event type catalog 是程式碼內的系統設定資料，不建 DB table，也不開放 UI CRUD。
-- 第一版以 TypeScript 檔案定義 `eventKey` 與 `sortOrder`。
+- 第一版以 TypeScript 檔案定義 `eventKey`、`displayName` 與 `sortOrder`。
 - UI checkbox 與後端訂閱校驗都以同一份 code-defined catalog 為準。
 - `deposit.blocked` 第一版正式支援，需納入 code-defined catalog。
 
 Catalog 草稿事件：
 
-- `withdrawal.created`
-- `withdrawal.cancelled`
-- `withdrawal.failed`
-- `withdrawal.completed`
-- `deposit.created`
-- `deposit.failed`
-- `deposit.completed`
-- `deposit.blocked`
+| Event key | Display name | Sort order |
+| --- | --- | ---: |
+| `withdrawal.created` | Withdrawal created | 10 |
+| `withdrawal.cancelled` | Withdrawal cancelled | 20 |
+| `withdrawal.failed` | Withdrawal failed | 30 |
+| `withdrawal.completed` | Withdrawal completed | 40 |
+| `deposit.created` | Deposit created | 50 |
+| `deposit.failed` | Deposit failed | 60 |
+| `deposit.completed` | Deposit completed | 70 |
+| `deposit.blocked` | Deposit blocked | 80 |
 
 ## Outbox And Delivery Split
 

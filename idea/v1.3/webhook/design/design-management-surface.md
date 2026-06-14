@@ -30,7 +30,7 @@ Subscription list：
 Create / edit form：
 
 - Event checkbox options 由 `GET /webhook/merch/event-types` 載入，不在前端 hard-code。
-- Event options 依 `sortOrder` 顯示，顯示文字第一版直接使用 `eventKey`。
+- Event options 依 `sortOrder` 顯示，顯示文字第一版使用後端回傳的 `displayName`。
 - Submit 時送出 trim 後的 `endpointUrl` 與完整 `eventKeys` 集合。
 - 允許不勾選任何事件；送出空 `eventKeys` 陣列時，subscription endpoint 保留但不訂閱任何事件。
 - Validation error 需能顯示 endpoint URL 錯誤、event selection 錯誤與 merchant scope / not found 錯誤。

@@ -114,24 +114,28 @@ Conceptual properties：
 | Property | 代表意義 |
 | --- | --- |
 | `eventKey` | 穩定事件 key，例如 `withdrawal.completed`。 |
+| `displayName` | 後台 UI 顯示名稱，例如 `Withdrawal completed`。 |
 | `sortOrder` | UI 顯示或 catalog 排序用的順序值。 |
 
 Domain rules：
 
 - `eventKey` 必須唯一。
+- `displayName` 由 code-defined catalog 提供，供第一版 UI 顯示；它不是 validation 或 dispatcher matching 的識別值。
 - Event type 由系統控制，商戶不能自行建立或修改。
 - Producer、dispatcher、management API 都應以同一份 event type catalog 作為事件合法性來源。
 
 目前事件清單草稿：
 
-- `withdrawal.created`
-- `withdrawal.cancelled`
-- `withdrawal.failed`
-- `withdrawal.completed`
-- `deposit.created`
-- `deposit.failed`
-- `deposit.completed`
-- `deposit.blocked`
+| Event key | Display name | Sort order |
+| --- | --- | ---: |
+| `withdrawal.created` | Withdrawal created | 10 |
+| `withdrawal.cancelled` | Withdrawal cancelled | 20 |
+| `withdrawal.failed` | Withdrawal failed | 30 |
+| `withdrawal.completed` | Withdrawal completed | 40 |
+| `deposit.created` | Deposit created | 50 |
+| `deposit.failed` | Deposit failed | 60 |
+| `deposit.completed` | Deposit completed | 70 |
+| `deposit.blocked` | Deposit blocked | 80 |
 
 `deposit.blocked` 第一版正式支援，需納入 code-defined catalog 與訂閱選項。
 

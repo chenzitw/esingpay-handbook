@@ -25,6 +25,8 @@ merchant console
   -> webhook subscription persistence
 ```
 
+第一版 management RPC 統一信任 api-gateway 已完成登入驗證，並信任 api-gateway 傳入的 `identity.merchantId` 作為 merchant scope 來源。Webhook service 不重複驗證 JWT；非 api-gateway caller 的 access control 依 codebase 既有 internal RPC convention 控制。
+
 概念邊界：
 
 ```text

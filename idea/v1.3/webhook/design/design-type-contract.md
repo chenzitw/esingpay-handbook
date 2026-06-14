@@ -139,14 +139,19 @@ Merchant console 的 subscription management DTO 與交易 domain raw 無直接�
 
 Subscription summary / detail DTO 是 management read model，不是 `WebhookSubscription` domain object 本體。`eventTypeCount` 與 `eventTypes` 都由 subscription-event binding 與 code-defined event catalog 組裝，不應反推為 subscription 本體欄位。
 
-`id` 欄位以 `string` 表示，對應後端 bigint 序列化結果。時間欄位以 `IsoDateTimeUtc` 表示，值為 UTC ISO 8601 字串。具體 TypeScript class、validation decorator 與序列化設定留給 plan 依 codebase pattern 決定。
+`id` 欄位以 `string` 表示，對應平台 short id string representation；後端 persistence id 仍為 bigint。時間欄位以 `IsoDateTimeUtc` 表示，值為 UTC ISO 8601 字串。具體 TypeScript class、validation decorator 與序列化設定留給 plan 依 codebase pattern 決定。
 
 ```typescript
 type IsoDateTimeUtc = string;
 
 interface WebhookEventTypeOptionDto {
   eventKey: string;
+  displayName: string;
   sortOrder: number;
+}
+
+interface WebhookEventTypeListResponseDto {
+  items: WebhookEventTypeOptionDto[];
 }
 
 interface WebhookSubscriptionSummaryDto {
@@ -187,9 +192,9 @@ interface DeleteWebhookSubscriptionResponseDto {
 }
 ```
 
-`CreateWebhookSubscriptionRequestDto` 與 `UpdateWebhookSubscriptionRequestDto` 欄位集合相同；plan 可根據 codebase 慣例決定使用同一個 class 或分開定義。
+REST/RPC management contract 中的 subscription `id` 與 path parameter `subscriptionId` 使用平台 short id string representation；DB persistence id 仍為 bigint。`CreateWebhookSubscriptionRequestDto` 與 `UpdateWebhookSubscriptionRequestDto` 欄位集合相同；plan 可根據 codebase 慣例決定使用同一個 class 或分開定義。
 
-UI 顯示文字第一版直接使用 `eventKey`；`sortOrder` 只供前端排序，不代表事件優先權或處理順序。
+UI 顯示文字第一版使用 catalog 提供的 `displayName`；`eventKey` 仍是 request validation、subscription binding 與 dispatcher matching 的穩定識別。`sortOrder` 只供前端排序，不代表事件優先權或處理順序。
 
 ## Signing Boundary
 

@@ -30,7 +30,7 @@ REST 與 RPC 的 error code 應保持同一組穩定 code，避免 gateway 做�
 | Scenario | Stable code | Suggested HTTP status | User-facing message |
 | --- | --- | ---: | --- |
 | `endpointUrl` missing or blank | `WEBHOOK_ENDPOINT_URL_REQUIRED` | 400 | Callback URL is required. |
-| `endpointUrl` format invalid | `WEBHOOK_ENDPOINT_URL_INVALID` | 400 | Callback URL must be a valid HTTP or HTTPS URL. |
+| `endpointUrl` format invalid | `WEBHOOK_ENDPOINT_URL_INVALID` | 400 | Callback URL must be a valid HTTPS URL. |
 | `eventKeys` missing or not an array | `WEBHOOK_EVENT_KEYS_REQUIRED` | 400 | Event type selection is required. |
 | `eventKeys` contains duplicate key | `WEBHOOK_EVENT_KEYS_DUPLICATED` | 400 | Event type selection contains duplicates. |
 | `eventKeys` contains unsupported key | `WEBHOOK_EVENT_KEY_UNSUPPORTED` | 400 | One or more event types are not supported. |

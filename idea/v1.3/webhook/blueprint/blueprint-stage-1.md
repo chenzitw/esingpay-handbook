@@ -44,6 +44,7 @@ Out of scope：
 - RPC surface：[`../design/design-rpc.md`](../design/design-rpc.md)。
 - Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
 - Service boundary：[`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
+- Type contract：[`../design/design-type-contract.md`](../design/design-type-contract.md)。
 
 ## Stage Decisions
 
@@ -57,7 +58,9 @@ Out of scope：
 - 同一 merchant 可建立多筆相同 endpoint URL 的 subscription；第一版不做 merchant + endpoint URL 唯一性限制。
 - REST request / response 欄位使用 camelCase；DB 欄位命名由 mapping layer 轉換。
 - Merchant console 經由 api-gateway REST route 存取 webhook management；api-gateway 使用 REST RPC proxy 呼叫 webhook service management RPC。
-- Webhook service 是 RPC 內部服務，不重複驗證 JWT。商戶身分來源為 RPC 呼叫方傳入的 `identity.merchantId`；merchant scope query 使用此值作為 `merchant_id` 篩選條件。
+- Webhook service 是 RPC 內部服務，第一版 management RPC 統一信任 api-gateway 的登入驗證，不重複驗證 JWT。商戶身分來源為 api-gateway 傳入的 `identity.merchantId`；merchant scope query 使用此值作為 `merchant_id` 篩選條件。
+- REST controller handler 回傳 design-rest 定義的 DTO payload；api-gateway response interceptor 依平台 convention 包裝實際 HTTP response，例如 `{ code, message, data }`。
+- REST/RPC management contract 中的 subscription `id` 與 `{subscriptionId}` path parameter 使用平台 short id string representation；DB persistence id 仍為 bigint。查詢 persistence 前需驗證並解析 short id，格式不合法或無法解析時回傳 `WEBHOOK_SUBSCRIPTION_ID_INVALID`。
 - Validation、normalization、pagination 與 sorting 依 [`../design/design-rest.md`](../design/design-rest.md)。
 - Stable error code 與 merchant scope failure 語意依 [`../design/design-error-contract.md`](../design/design-error-contract.md)。
 
@@ -70,21 +73,28 @@ Out of scope：
 工作內容：
 
 - 決定 api-gateway REST controller / proxy mapping，以及 webhook service RPC handler、service、repository、DTO、validation、pagination、error response pattern。
-- 決定 migration 的做法，並確認 code-defined event type catalog 要放在哪個 TypeScript module。
+- 以 `apps/esingpay-cradle/src` 內的 `webhook` module 作為目前預設落地位置；Phase 1 codebase survey 需確認 module path、provider wiring、export boundary 與既有 module convention 是否一致。
+- 決定 migration 的做法，並確認 code-defined event type catalog 要放在 `webhook` module 內的哪個 TypeScript module。
+- 確認 management DTO class、validation decorator 與 serialization convention，包含 `CreateWebhookSubscriptionRequestDto` 與 `UpdateWebhookSubscriptionRequestDto` 是否沿用同一個 class。
+- 確認 webhook REST / RPC error convention：controller handler 回傳 DTO payload，REST HTTP response 由 api-gateway interceptor 包裝為 `{ code, message, data }`，RPC result 沿用 `{ code, data }`；確認 error enum、message map、status map、RPC → REST mapping 與 validation field metadata 是否放入 REST `data`。
 - 決定 merchant console frontend 的 API client、route、page/form state 與錯誤顯示慣例。
 - 確認 webhook service 讀取 RPC 傳入 `identity.merchantId` 的實作慣例，確保與 codebase 其他 RPC 服務一致。
+- 確認 management RPC 第一版只信任 api-gateway 傳入的 authenticated merchant identity，非 api-gateway caller 的 access control 依 codebase 既有 internal RPC convention。
 - 確認 soft delete query convention。
 - 確認 route prefix 與 path parameter 命名是否沿用 [`design-rest.md`](../design/design-rest.md)。
 
 輸出：
 
-- Stage 1 plan 可使用的 service boundary、module boundary 與 implementation convention。
+- Stage 1 plan 可使用的 service boundary、`apps/esingpay-cradle/src/webhook` module boundary 與 implementation convention。
 - 若新服務需沿用平台既有 convention，plan 需記錄來源與採用理由。
 
 Validation target：
 
-- Plan 作者能指出 api-gateway REST proxy、webhook RPC handler、service、repository、migration、event catalog module、DTO 與 frontend API/page/form 應如何切分。
+- Plan 作者能指出 api-gateway REST proxy、webhook RPC handler、service、repository、migration、event catalog module、DTO class / serialization 與 frontend API/page/form 應如何切分。
 - Plan 作者能指出 `identity.merchantId` 在 webhook service 層如何取得並用於 merchant scope query。
+- Plan 作者能指出 subscription short id string 如何驗證、解析為 persistence bigint id，以及解析失敗如何映射為 `WEBHOOK_SUBSCRIPTION_ID_INVALID`。
+- Plan 作者能確認 `apps/esingpay-cradle/src/webhook` 作為 Stage 1 backend 落地 module 時，需要沿用或新增的 provider wiring、exports 與目錄切分。
+- Plan 作者能指出 webhook REST error code 的 contract-rest enum / message map / status map、webhook RPC error code enum，以及 RPC result code 映射為 REST `{ code, message, data }` 的方式；若使用 field-level metadata，需說明 REST `data` shape 與 frontend handling。
 
 ### Phase 2：Persistence Schema And Event Catalog
 
@@ -94,17 +104,22 @@ Validation target：
 
 - 建立 `webhook_subscription`。
 - 建立 `webhook_subscription_event_type`。
-- 在 TypeScript 檔案定義第一版 event type catalog：
-  - `withdrawal.created`
-  - `withdrawal.cancelled`
-  - `withdrawal.failed`
-  - `withdrawal.completed`
-  - `deposit.created`
-  - `deposit.failed`
-  - `deposit.completed`
-  - `deposit.blocked`
+- 在 TypeScript 檔案定義第一版 event type catalog，包含 `eventKey`、`displayName` 與 `sortOrder`：
+  - `withdrawal.created` / `Withdrawal created` / `10`
+  - `withdrawal.cancelled` / `Withdrawal cancelled` / `20`
+  - `withdrawal.failed` / `Withdrawal failed` / `30`
+  - `withdrawal.completed` / `Withdrawal completed` / `40`
+  - `deposit.created` / `Deposit created` / `50`
+  - `deposit.failed` / `Deposit failed` / `60`
+  - `deposit.completed` / `Deposit completed` / `70`
+  - `deposit.blocked` / `Deposit blocked` / `80`
 - `webhook_subscription_event_type` 以 `event_type` 保存 event key 字串。
 - 建立 subscription-event relation 不可重複的約束或等效檢查。
+- 建立 Stage 1 所需 index / constraint；具體 index name 與 migration 語法由 plan 依 codebase convention 定案：
+  - `webhook_subscription` B-tree index `(merchant_id, deleted_at)`，支援 merchant scope active subscription query。
+  - `webhook_subscription` B-tree index `(merchant_id, endpoint_url)`，支援後續同商戶 endpoint query；不是唯一性約束。
+  - `webhook_subscription_event_type` composite PK `(webhook_subscription_id, event_type)`，防止同一 subscription 重複綁定同一 event key，並支援 subscription → event type 查詢。
+  - `webhook_subscription_event_type` B-tree index `(event_type)`，支援 Stage 3 dispatcher 依 event type 反向查詢訂閱者。
 - 不建立 merchant + endpoint URL 唯一性約束。
 
 Validation target：
@@ -113,6 +128,7 @@ Validation target：
 migration applied
   -> webhook_subscription and webhook_subscription_event_type exist
   -> code-defined event type catalog exists
+  -> Stage 1 indexes and subscription-event composite PK exist
   -> duplicate subscription-event relation rejected
   -> same merchant can create duplicate endpoint_url subscriptions
 ```
@@ -124,7 +140,7 @@ migration applied
 工作內容：
 
 - 實作 `GET /webhook/merch/event-types`。
-- 回傳 `WebhookEventTypeOptionDto[]` 所需欄位。
+- 回傳 `WebhookEventTypeListResponseDto`，shape 為 `{ items: WebhookEventTypeOptionDto[] }`。
 - 依 `sortOrder` 排序。
 - 建立 event keys validation helper / service capability。
 - 確保 subscription create / update 不接受 code-defined catalog 以外的 event key。
@@ -134,7 +150,7 @@ Validation target：
 ```text
 merchant user
   -> GET /webhook/merch/event-types
-  -> receives all first-version event keys including deposit.blocked
+  -> receives items containing all first-version event keys including deposit.blocked, with displayName and sortOrder
   -> invalid event key is rejected by subscription validation
 ```
 
@@ -184,8 +200,8 @@ merchant user
 - 實作 api-gateway `DELETE /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook DeleteSubscription RPC。
 - 實作 webhook service CreateSubscription RPC：驗證 `endpointUrl` 與 `eventKeys`，在同一 transaction 或等效一致性邊界內建立 `webhook_subscription` 與 `webhook_subscription_event_type` rows，回傳 subscription detail。
 - 實作 webhook service UpdateSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` lookup，在同一 transaction 或等效一致性邊界內更新 `endpoint_url` 並以 delete-then-insert 替換 event bindings，回傳 subscription detail；`eventKeys` 為空陣列時刪除所有 binding rows 但保留 subscription。
-- 實作 webhook service DeleteSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` soft delete，不刪除 `webhook_subscription_event_type` rows。
-- 實作 `endpointUrl` validation：trim、不可空白、URL 格式檢查。
+- 實作 webhook service DeleteSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` soft delete，同步更新 `deleted_at` 與 `updated_at`，不刪除 `webhook_subscription_event_type` rows。
+- 實作 `endpointUrl` validation：trim、不可空白、必須是有效 HTTPS URL，第一版不接受 `http`。
 - 實作 `eventKeys` validation：必須是陣列、不可重複、每個 key 必須存在於 code-defined event catalog；允許空陣列。
 - 補齊 write-side error mapping：`WEBHOOK_ENDPOINT_URL_REQUIRED`、`WEBHOOK_ENDPOINT_URL_INVALID`、`WEBHOOK_EVENT_KEYS_REQUIRED`、`WEBHOOK_EVENT_KEYS_DUPLICATED`、`WEBHOOK_EVENT_KEY_UNSUPPORTED`、`WEBHOOK_SUBSCRIPTION_OPERATION_FAILED`。
 - 確認 create 的 subscription + binding insert 在同一 consistency boundary 內完成。
@@ -201,6 +217,7 @@ merchant user
   -> binding rows reflect new eventKeys only
   -> update with empty eventKeys removes all bindings, keeps subscription
   -> soft delete subscription
+  -> deleted_at and updated_at are updated
   -> deleted subscription disappears from list and get
   -> invalid endpointUrl or eventKeys rejected with stable error code
 ```
@@ -224,8 +241,9 @@ merchant user
 - 串接 `GET /webhook/merch/event-types` 作為 event checkbox options 來源。
 - 串接 subscription list / create / detail / update / delete API。
 - Create / update form 使用 `endpointUrl` 與完整 `eventKeys` 集合送出。
-- Event type 顯示文字第一版直接使用 `eventKey`，並依 `sortOrder` 排序。
-- Delete 後刷新清單，確保軟刪除資料不再顯示。
+- Event type 顯示文字第一版使用後端回傳的 `displayName`，並依 `sortOrder` 排序。
+- Subscription list 需處理 loading、empty、error 與 pagination states；empty state 需提供建立入口，error state 需保留重試入口。
+- Delete 前需有 confirmation；delete 成功後刷新清單，確保軟刪除資料不再顯示；delete 失敗時保留原清單狀態並顯示錯誤。
 - 顯示 backend validation error，例如 event key 無效、merchant scope 拒絕。
 
 Validation target：
@@ -238,6 +256,7 @@ merchant console user
   -> edits endpointUrl and eventKeys
   -> deletes subscription
   -> list reflects latest backend state
+  -> handles loading, empty, error, pagination and delete confirmation states
 ```
 
 ### Phase 7：Stage 1 Verification And Tests
@@ -263,7 +282,7 @@ Validation target：
 stage 1 verification
   -> backend API tests pass
   -> frontend subscription management smoke path passes
-  -> code-defined event type catalog includes all first-version event keys
+  -> code-defined event type catalog includes all first-version event keys, displayName values and sortOrder values
   -> merchant scoping and soft delete behavior verified
 ```
 
@@ -271,7 +290,7 @@ stage 1 verification
 
 | Area | Coverage |
 | --- | --- |
-| Event catalog | `GET /event-types` returns all first-version event keys, sorted by `sortOrder`, without DB event type id. |
+| Event catalog | `GET /event-types` returns `{ items }` containing all first-version event keys with `displayName`, sorted by `sortOrder`, without DB event type id. |
 | Create subscription | Creates `webhook_subscription` and binding rows in one consistency boundary; returns detail read model with sorted `eventTypes`. |
 | Create validation | Rejects blank / invalid endpoint URL, duplicated eventKeys, unsupported eventKeys, malformed body; allows empty eventKeys array. |
 | Empty event subscription | Create with empty `eventKeys` creates subscription without binding rows; update with empty `eventKeys` removes all binding rows and keeps subscription. |
@@ -279,9 +298,9 @@ stage 1 verification
 | List subscriptions | Filters by `identity.merchantId`, excludes deleted rows, returns pagination metadata, sorts by `created_at desc, id desc`. |
 | Get subscription | Looks up by `subscriptionId + identity.merchantId`, returns detail read model, rejects deleted or cross-merchant access as not found. |
 | Update subscription | Updates endpoint URL, replaces binding rows by delete + insert, validates eventKeys, keeps operation atomic. |
-| Delete subscription | Soft deletes by `subscriptionId + identity.merchantId`, excludes deleted row from list/get, does not hard delete binding rows. |
+| Delete subscription | Soft deletes by `subscriptionId + identity.merchantId`, updates `deleted_at` and `updated_at`, excludes deleted row from list/get, does not hard delete binding rows. |
 | Gateway proxy | Maps REST requests to webhook management RPC inputs, passes `identity.merchantId`, maps RPC errors to REST status/envelope. |
-| Frontend smoke | Loads options, creates, edits, deletes, handles empty/loading/error/delete confirmation states. |
+| Frontend smoke | Loads options, creates, edits, deletes, handles loading/empty/error/pagination/delete confirmation states, and preserves the list when delete fails. |
 
 ## Sequencing
 
@@ -296,8 +315,8 @@ stage 1 verification
 
 | Phase | 估時 | 依據 |
 | --- | ---: | --- |
-| Phase 1 | 0.5 天 | 決定新服務 backend/frontend boundary、migration、event catalog module、merchant scoping 與 soft delete convention。 |
-| Phase 2 | 0.75 天 | 兩張表、code-defined event catalog、relation 約束；不建立 event type table 與 endpoint unique constraint。 |
+| Phase 1 | 0.5 天 | 確認 `apps/esingpay-cradle/src/webhook` module 落地方式、backend/frontend boundary、migration、event catalog module、merchant scoping 與 soft delete convention。 |
+| Phase 2 | 0.75 天 | 兩張表、code-defined event catalog、relation 約束與 Stage 1 index；不建立 event type table 與 endpoint unique constraint。 |
 | Phase 3 | 0.75 天 | Event type read endpoint 與 event key validation capability。 |
 | Phase 4 | 0.75 天 | Api-gateway REST proxy 基礎、subscription read-side RPC（list/get）、query model 組裝、merchant scope 與 error mapping baseline。 |
 | Phase 5 | 1.25 天 | Subscription write-side RPC（create/update/delete）、binding transaction 邊界、write validation 與 error mapping。 |

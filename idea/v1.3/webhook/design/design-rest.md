@@ -25,6 +25,10 @@ merchant console
 
 REST endpoint 是前端可見 contract；webhook service 內部落地對應的 RPC method。Api-gateway 負責既有登入驗證與 REST error envelope mapping，webhook service 依 RPC 傳入的 `identity.merchantId` 做 merchant scope。
 
+第一版 management RPC 統一信任 api-gateway 的登入驗證與 merchant identity 傳遞；webhook service 不重複驗證 JWT。非 api-gateway caller 是否可呼叫 management RPC 依 codebase 既有 internal RPC access convention 控制。
+
+本文的 response examples 描述 controller handler 回傳的 `data` payload。Api-gateway response interceptor 會依平台既有 convention 將成功 response 包裝成 REST envelope，例如 `{ code, message, data }`。
+
 REST request / response 欄位應盡量與 webhook management RPC input / output 對齊，避免 gateway 做不必要的語意轉換。
 
 Merchant scope rules：
@@ -38,13 +42,14 @@ Merchant scope rules：
 - JSON 欄位使用 camelCase，對齊前端 TypeScript 與 domain design 命名。
 - DB 欄位若使用 snake_case，由後端 mapping layer 轉換，不直接外露給前端。
 - Subscription ID 在 response 中以 `id` 表示；event type option 第一版不提供 DB id，建立或更新訂閱事件時使用穩定的 `eventKey`。
+- Subscription `id` 與 `{subscriptionId}` path parameter 使用平台 short id string representation；persistence id 仍為 bigint。Api-gateway 或 webhook management boundary 需先驗證並解析 short id，再查詢 persistence；格式不合法或無法解析時回傳 `WEBHOOK_SUBSCRIPTION_ID_INVALID`。
 
 ## Request Validation And Normalization
 
 Validation rules：
 
 - `endpointUrl` 必填，trim 後不可為空。
-- `endpointUrl` 必須是有效 HTTP/HTTPS URL；是否允許 `http` 由環境與安全規則決定。
+- `endpointUrl` 必須是有效 HTTPS URL；第一版不接受 `http`。
 - 後端保存與回傳的 `endpointUrl` 使用 trim 後的值；不做會改變語意的 URL normalization，例如自動補 slash、改 host casing 以外的重寫。
 - `eventKeys` 必填且必須是陣列；允許空陣列。
 - `eventKeys` 不可包含重複 key；重複 key 應回傳 validation error，不由後端靜默去重。
@@ -85,6 +90,7 @@ Subscription summary / detail DTO 是 management read model，不是 `WebhookSub
 | Field | Type | Required | 說明 |
 | --- | --- | --- | --- |
 | `eventKey` | `string` | yes | 穩定事件 key，例如 `deposit.completed`。 |
+| `displayName` | `string` | yes | 後台 UI 顯示名稱，例如 `Deposit completed`。 |
 | `sortOrder` | `number` | yes | 前端顯示排序。 |
 
 範例：
@@ -92,6 +98,7 @@ Subscription summary / detail DTO 是 management read model，不是 `WebhookSub
 ```json
 {
   "eventKey": "deposit.blocked",
+  "displayName": "Deposit blocked",
   "sortOrder": 80
 }
 ```
@@ -127,10 +134,12 @@ Response：
   "items": [
     {
       "eventKey": "withdrawal.created",
+      "displayName": "Withdrawal created",
       "sortOrder": 10
     },
     {
       "eventKey": "deposit.blocked",
+      "displayName": "Deposit blocked",
       "sortOrder": 80
     }
   ]
@@ -139,14 +148,16 @@ Response：
 
 第一版支援事件：
 
-- `withdrawal.created`
-- `withdrawal.cancelled`
-- `withdrawal.failed`
-- `withdrawal.completed`
-- `deposit.created`
-- `deposit.failed`
-- `deposit.completed`
-- `deposit.blocked`
+| Event key | Display name | Sort order |
+| --- | --- | ---: |
+| `withdrawal.created` | Withdrawal created | 10 |
+| `withdrawal.cancelled` | Withdrawal cancelled | 20 |
+| `withdrawal.failed` | Withdrawal failed | 30 |
+| `withdrawal.completed` | Withdrawal completed | 40 |
+| `deposit.created` | Deposit created | 50 |
+| `deposit.failed` | Deposit failed | 60 |
+| `deposit.completed` | Deposit completed | 70 |
+| `deposit.blocked` | Deposit blocked | 80 |
 
 ## GET `/webhook/merch/subscriptions`
 
@@ -225,14 +236,17 @@ Response：`WebhookSubscriptionDetailDto`
   "eventTypes": [
     {
       "eventKey": "withdrawal.completed",
+      "displayName": "Withdrawal completed",
       "sortOrder": 40
     },
     {
       "eventKey": "deposit.completed",
+      "displayName": "Deposit completed",
       "sortOrder": 70
     },
     {
       "eventKey": "deposit.blocked",
+      "displayName": "Deposit blocked",
       "sortOrder": 80
     }
   ],
@@ -243,7 +257,7 @@ Response：`WebhookSubscriptionDetailDto`
 
 Validation：
 
-- `endpointUrl` 必須是可接受的 HTTP/HTTPS URL；是否允許 HTTP 由 plan 依環境與安全規則決定。
+- `endpointUrl` 必須是可接受的 HTTPS URL；第一版不接受 HTTP。
 - `eventKeys` 必須是陣列，可為空陣列，且不可重複。
 - `eventKeys` 內每個 key 都必須存在於 backend code-defined webhook event type catalog。
 - 同一 merchant 可建立多筆相同 endpoint URL 的 subscription；第一版不拒絕重複 endpoint。
@@ -263,6 +277,7 @@ Response：`WebhookSubscriptionDetailDto`
   "eventTypes": [
     {
       "eventKey": "withdrawal.completed",
+      "displayName": "Withdrawal completed",
       "sortOrder": 40
     }
   ],
@@ -324,7 +339,7 @@ Operation semantics：
 
 - 以 `subscriptionId + identity.merchantId` 查詢未刪除 subscription。
 - 找不到、已刪除或不屬於目前 merchant 時，錯誤語意使用 not found。
-- Soft delete 更新 `deleted_at`；是否同步更新 `updated_at` 由 plan 依 codebase timestamp convention 定案。
+- Soft delete 同步更新 `deleted_at` 與 `updated_at`。
 - Soft delete 不刪除 `webhook_subscription_event_type` rows；dispatcher 查詢必須排除 deleted subscription。
 
 Response：
