@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -20,6 +20,7 @@ In scope：
 - `webhook_subscription_event_type` relation。
 - Code-defined webhook event type catalog 與 read endpoint。
 - Api-gateway subscription create / list / get / update / delete REST API。
+- Platform / merchant account surface 的 subscription CRUD permission code mapping。
 - Webhook service subscription management RPC。
 - Event type keys validation。
 - Merchant scoping。
@@ -50,14 +51,16 @@ Out of scope：
 
 - Event type catalog 由 TypeScript 檔案定義，不建 DB table，也不開放 UI CRUD。
 - `deposit.blocked` 第一版正式納入 code-defined catalog 與可訂閱選項。
-- Event type read model 採獨立 endpoint：`GET /webhook/merch/event-types`。
+- Event type read model 採獨立 endpoint：merchant route 為 `GET /webhook/merch/event-types`，platform route 為 `GET /webhook/plat/event-types`。
 - Subscription delete 採 soft delete。
 - Subscription 是否可參與後續派送由「未刪除且訂閱目標事件」判斷。
 - Subscription 可沒有任何 event binding；空 `eventKeys` 代表保留 endpoint 但取消所有事件訂閱。
 - `WebhookSubscription` 本體不包含 `eventTypes`；`eventTypes` / `eventTypeCount` 是 management read model 組裝結果。
 - 同一 merchant 可建立多筆相同 endpoint URL 的 subscription；第一版不做 merchant + endpoint URL 唯一性限制。
 - REST request / response 欄位使用 camelCase；DB 欄位命名由 mapping layer 轉換。
-- Merchant console 經由 api-gateway REST route 存取 webhook management；api-gateway 使用 REST RPC proxy 呼叫 webhook service management RPC。
+- Merchant console / platform console 經由 api-gateway REST route 存取 webhook management；api-gateway 使用 REST RPC proxy 呼叫 webhook service management RPC。
+- REST RPC route key 依 account surface 拆分：merchant route keys 使用 `rest.webhook.merch-event-type.list` 與 `rest.webhook.merch-subscription.*`；platform route keys 使用 `rest.webhook.plat-event-type.list` 與 `rest.webhook.plat-subscription.*`。Route key mapping 依 [`../design/design-rpc.md`](../design/design-rpc.md)。
+- Subscription CRUD REST routes 需依 account surface 掛 permission decorator：merchant account 使用 `/webhook/merch/...` 路由與 `merch:webhooks:list`、`merch:webhooks:view`、`merch:webhooks:create`、`merch:webhooks:update`、`merch:webhooks:delete`；platform account 使用 `/webhook/plat/...` 路由與 `plat:merch_webhooks:list`、`plat:merch_webhooks:view`、`plat:merch_webhooks:create`、`plat:webhooks:update`、`plat:merch_webhooks:delete`。Stage 1 update route 使用專屬 update permission。
 - Webhook service 是 RPC 內部服務，第一版 management RPC 統一信任 api-gateway 的登入驗證，不重複驗證 JWT。商戶身分來源為 api-gateway 傳入的 `identity.merchantId`；merchant scope query 使用此值作為 `merchant_id` 篩選條件。
 - REST controller handler 回傳 design-rest 定義的 DTO payload；api-gateway response interceptor 依平台 convention 包裝實際 HTTP response，例如 `{ code, message, data }`。
 - REST/RPC management contract 中的 subscription `id` 與 `{subscriptionId}` path parameter 使用平台 short id string representation；DB persistence id 仍為 bigint。查詢 persistence 前需驗證並解析 short id，格式不合法或無法解析時回傳 `WEBHOOK_SUBSCRIPTION_ID_INVALID`。
@@ -73,6 +76,8 @@ Out of scope：
 工作內容：
 
 - 決定 api-gateway REST controller / proxy mapping，以及 webhook service RPC handler、service、repository、DTO、validation、pagination、error response pattern。
+- 確認 REST RPC route key 定義與 typed API mapping；merchant 使用 `rest.webhook.merch-*`，platform 使用 `rest.webhook.plat-*`，不可讓兩個 account surface 共用同一個 REST RPC route key。
+- 確認 platform / merchant account surface 的 permission decorator 掛載位置與 permission code mapping；platform-facing route 需使用 `/webhook/plat/...`，plan 需明確指出目標 merchant scope 如何由 api-gateway 解析並傳入 webhook management RPC。
 - 以 `apps/esingpay-cradle/src` 內的 `webhook` module 作為目前預設落地位置；Phase 1 codebase survey 需確認 module path、provider wiring、export boundary 與既有 module convention 是否一致。
 - 決定 migration 的做法，並確認 code-defined event type catalog 要放在 `webhook` module 內的哪個 TypeScript module。
 - 確認 management DTO class、validation decorator 與 serialization convention，包含 `CreateWebhookSubscriptionRequestDto` 與 `UpdateWebhookSubscriptionRequestDto` 是否沿用同一個 class。
@@ -91,6 +96,8 @@ Out of scope：
 Validation target：
 
 - Plan 作者能指出 api-gateway REST proxy、webhook RPC handler、service、repository、migration、event catalog module、DTO class / serialization 與 frontend API/page/form 應如何切分。
+- Plan 作者能指出 merchant / platform REST RPC route key 與 REST route / conceptual RPC method 的對應。
+- Plan 作者能指出 subscription CRUD REST routes 的 platform / merchant URL 與 permission decorator 對應；尤其 platform URL 必須使用 `/webhook/plat/...`，update route 需使用 `merch:webhooks:update` / `plat:webhooks:update`。
 - Plan 作者能指出 `identity.merchantId` 在 webhook service 層如何取得並用於 merchant scope query。
 - Plan 作者能指出 subscription short id string 如何驗證、解析為 persistence bigint id，以及解析失敗如何映射為 `WEBHOOK_SUBSCRIPTION_ID_INVALID`。
 - Plan 作者能確認 `apps/esingpay-cradle/src/webhook` 作為 Stage 1 backend 落地 module 時，需要沿用或新增的 provider wiring、exports 與目錄切分。
@@ -139,7 +146,7 @@ migration applied
 
 工作內容：
 
-- 實作 `GET /webhook/merch/event-types`。
+- 實作 merchant route `GET /webhook/merch/event-types` 與 platform route `GET /webhook/plat/event-types`，分別綁定 `rest.webhook.merch-event-type.list` 與 `rest.webhook.plat-event-type.list`。
 - 回傳 `WebhookEventTypeListResponseDto`，shape 為 `{ items: WebhookEventTypeOptionDto[] }`。
 - 依 `sortOrder` 排序。
 - 建立 event keys validation helper / service capability。
@@ -150,6 +157,8 @@ Validation target：
 ```text
 merchant user
   -> GET /webhook/merch/event-types
+platform user
+  -> GET /webhook/plat/event-types
   -> receives items containing all first-version event keys including deposit.blocked, with displayName and sortOrder
   -> invalid event key is rejected by subscription validation
 ```
@@ -162,6 +171,10 @@ merchant user
 
 - 實作 api-gateway `GET /webhook/merch/subscriptions` 並 proxy 到 webhook ListSubscriptions RPC。
 - 實作 api-gateway `GET /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook GetSubscription RPC。
+- 實作 api-gateway `GET /webhook/plat/subscriptions` 並 proxy 到 webhook ListSubscriptions RPC。
+- 實作 api-gateway `GET /webhook/plat/subscriptions/{subscriptionId}` 並 proxy 到 webhook GetSubscription RPC。
+- read routes 分別綁定 `rest.webhook.merch-subscription.list`、`rest.webhook.merch-subscription.view`、`rest.webhook.plat-subscription.list`、`rest.webhook.plat-subscription.view`。
+- 在 `/webhook/merch/...` read routes 掛上 `merch:webhooks:list` / `merch:webhooks:view`；在 `/webhook/plat/...` read routes 掛上 `plat:merch_webhooks:list` / `plat:merch_webhooks:view`。
 - 實作 webhook service ListSubscriptions RPC：以 `merchant_id = identity.merchantId` 篩選未刪除 subscription，組裝 `eventTypeCount`，套用預設排序 `created_at desc, id desc` 與 pagination。
 - 實作 webhook service GetSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` 查詢，組裝 `eventTypes`（由 binding join code-defined catalog 依 `sortOrder` 排序），排除已刪除資料。
 - 實作 pagination validation：`page` 與 `pageSize` 正整數驗證、`pageSize` 上限、預設值。
@@ -177,10 +190,15 @@ merchant user
   -> GET /webhook/merch/subscriptions
   -> receives paginated list with eventTypeCount, sorted createdAt desc
   -> GET /webhook/merch/subscriptions/{subscriptionId}
+platform user
+  -> GET /webhook/plat/subscriptions
+  -> GET /webhook/plat/subscriptions/{subscriptionId}
   -> receives subscription detail with eventTypes sorted by sortOrder
   -> cross-merchant subscriptionId returns WEBHOOK_SUBSCRIPTION_NOT_FOUND
   -> malformed subscriptionId returns WEBHOOK_SUBSCRIPTION_ID_INVALID
   -> invalid pagination params return WEBHOOK_PAGINATION_INVALID
+  -> read REST RPC route keys match account surface
+  -> list/view route permission decorators match account surface permission codes
 ```
 
 驗證重點：
@@ -198,6 +216,11 @@ merchant user
 - 實作 api-gateway `POST /webhook/merch/subscriptions` 並 proxy 到 webhook CreateSubscription RPC。
 - 實作 api-gateway `PUT /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook UpdateSubscription RPC。
 - 實作 api-gateway `DELETE /webhook/merch/subscriptions/{subscriptionId}` 並 proxy 到 webhook DeleteSubscription RPC。
+- 實作 api-gateway `POST /webhook/plat/subscriptions` 並 proxy 到 webhook CreateSubscription RPC。
+- 實作 api-gateway `PUT /webhook/plat/subscriptions/{subscriptionId}` 並 proxy 到 webhook UpdateSubscription RPC。
+- 實作 api-gateway `DELETE /webhook/plat/subscriptions/{subscriptionId}` 並 proxy 到 webhook DeleteSubscription RPC。
+- write routes 分別綁定 `rest.webhook.merch-subscription.create`、`rest.webhook.merch-subscription.update`、`rest.webhook.merch-subscription.delete`、`rest.webhook.plat-subscription.create`、`rest.webhook.plat-subscription.update`、`rest.webhook.plat-subscription.delete`。
+- 在 `/webhook/merch/...` write routes 掛上 `merch:webhooks:create` / `merch:webhooks:update` / `merch:webhooks:delete`；在 `/webhook/plat/...` write routes 掛上 `plat:merch_webhooks:create` / `plat:webhooks:update` / `plat:merch_webhooks:delete`。
 - 實作 webhook service CreateSubscription RPC：驗證 `endpointUrl` 與 `eventKeys`，在同一 transaction 或等效一致性邊界內建立 `webhook_subscription` 與 `webhook_subscription_event_type` rows，回傳 subscription detail。
 - 實作 webhook service UpdateSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` lookup，在同一 transaction 或等效一致性邊界內更新 `endpoint_url` 並以 delete-then-insert 替換 event bindings，回傳 subscription detail；`eventKeys` 為空陣列時刪除所有 binding rows 但保留 subscription。
 - 實作 webhook service DeleteSubscription RPC：以 `subscriptionId + merchant_id = identity.merchantId` soft delete，同步更新 `deleted_at` 與 `updated_at`，不刪除 `webhook_subscription_event_type` rows。
@@ -220,6 +243,8 @@ merchant user
   -> deleted_at and updated_at are updated
   -> deleted subscription disappears from list and get
   -> invalid endpointUrl or eventKeys rejected with stable error code
+  -> write REST RPC route keys match account surface
+  -> create/update/delete route permission decorators match account surface permission codes
 ```
 
 驗證重點：
@@ -300,6 +325,8 @@ stage 1 verification
 | Update subscription | Updates endpoint URL, replaces binding rows by delete + insert, validates eventKeys, keeps operation atomic. |
 | Delete subscription | Soft deletes by `subscriptionId + identity.merchantId`, updates `deleted_at` and `updated_at`, excludes deleted row from list/get, does not hard delete binding rows. |
 | Gateway proxy | Maps REST requests to webhook management RPC inputs, passes `identity.merchantId`, maps RPC errors to REST status/envelope. |
+| REST RPC route keys | Merchant routes use `rest.webhook.merch-event-type.list` / `rest.webhook.merch-subscription.*`; platform routes use `rest.webhook.plat-event-type.list` / `rest.webhook.plat-subscription.*`. |
+| Permission decorators | `/webhook/merch/...` routes use `merch:webhooks:list/view/create/update/delete`; `/webhook/plat/...` routes use `plat:merch_webhooks:list/view/create/delete` and `plat:webhooks:update` for update. |
 | Frontend smoke | Loads options, creates, edits, deletes, handles loading/empty/error/pagination/delete confirmation states, and preserves the list when delete fails. |
 
 ## Sequencing

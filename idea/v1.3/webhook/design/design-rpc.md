@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-09
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -8,7 +8,7 @@ updated_by: Codex
 
 ## Purpose
 
-本文件鎖定 webhook 第一版 internal service-to-service capability。它不定義 public merchant-facing API；商戶後台 API 見 [`design-rest.md`](./design-rest.md)。
+本文件鎖定 webhook 第一版 internal service-to-service capability，以及 api-gateway REST RPC proxy 對 webhook management RPC 的 route key 命名。Merchant / platform 後台 REST API 見 [`design-rest.md`](./design-rest.md)。
 
 具體 contract-rpc 檔案位置、method name、input/output DTO 型別與 error mapping 留給 plan 依 codebase convention 決定。
 
@@ -16,11 +16,12 @@ updated_by: Codex
 
 Webhook 是交易事件推播能力的 owner。Withdrawal / deposit 服務不應直接建立 delivery 或呼叫商戶 endpoint；它們只需要向 webhook capability 表達「某交易事件已發生」。
 
-Merchant console 不直接呼叫 webhook service。商戶後台管理 flow 由 api-gateway 暴露 REST route，再透過 REST RPC proxy 呼叫 webhook service management RPC：
+Merchant console / platform console 不直接呼叫 webhook service。後台管理 flow 由 api-gateway 暴露 REST route，再透過 REST RPC proxy 呼叫 webhook service management RPC：
 
 ```text
-merchant console
+merchant console / platform console
   -> api-gateway REST
+  -> REST RPC proxy route
   -> webhook service management RPC
   -> webhook subscription persistence
 ```
@@ -66,6 +67,34 @@ Stage 1 subscription management RPC 的 subscription summary / detail output 是
 | `WebhookManagement.GetSubscription` | 查詢目前 merchant 的單一 subscription detail。 |
 | `WebhookManagement.UpdateSubscription` | 覆蓋 endpoint URL 與 event bindings。 |
 | `WebhookManagement.DeleteSubscription` | 軟刪除 subscription。 |
+
+## Stage 1 REST RPC Route Keys
+
+以下 route key 是 api-gateway REST RPC proxy 與 webhook service REST RPC adapter 之間的 naming anchor。它們不同於 conceptual `WebhookManagement.*` method name；plan 可依 codebase convention 決定實際檔案與 typed API 定義位置，但 route key 語意需保持穩定。
+
+命名規則：
+
+- Prefix 固定為 `rest.webhook`。
+- Merchant account surface 使用 `merch-*` segment，對應 `/webhook/merch/...` REST route。
+- Platform account surface 使用 `plat-*` segment，對應 `/webhook/plat/...` REST route。
+- `plat-subscription` 表示 platform account surface 管理 merchant webhook subscriptions；不代表 platform 自己擁有 webhook subscription。
+
+| Account surface | REST RPC route key | REST route | Conceptual method |
+| --- | --- | --- | --- |
+| Merchant | `rest.webhook.merch-event-type.list` | `GET /webhook/merch/event-types` | `WebhookManagement.ListEventTypes` |
+| Platform | `rest.webhook.plat-event-type.list` | `GET /webhook/plat/event-types` | `WebhookManagement.ListEventTypes` |
+| Merchant | `rest.webhook.merch-subscription.list` | `GET /webhook/merch/subscriptions` | `WebhookManagement.ListSubscriptions` |
+| Merchant | `rest.webhook.merch-subscription.view` | `GET /webhook/merch/subscriptions/{subscriptionId}` | `WebhookManagement.GetSubscription` |
+| Merchant | `rest.webhook.merch-subscription.create` | `POST /webhook/merch/subscriptions` | `WebhookManagement.CreateSubscription` |
+| Merchant | `rest.webhook.merch-subscription.update` | `PUT /webhook/merch/subscriptions/{subscriptionId}` | `WebhookManagement.UpdateSubscription` |
+| Merchant | `rest.webhook.merch-subscription.delete` | `DELETE /webhook/merch/subscriptions/{subscriptionId}` | `WebhookManagement.DeleteSubscription` |
+| Platform | `rest.webhook.plat-subscription.list` | `GET /webhook/plat/subscriptions` | `WebhookManagement.ListSubscriptions` |
+| Platform | `rest.webhook.plat-subscription.view` | `GET /webhook/plat/subscriptions/{subscriptionId}` | `WebhookManagement.GetSubscription` |
+| Platform | `rest.webhook.plat-subscription.create` | `POST /webhook/plat/subscriptions` | `WebhookManagement.CreateSubscription` |
+| Platform | `rest.webhook.plat-subscription.update` | `PUT /webhook/plat/subscriptions/{subscriptionId}` | `WebhookManagement.UpdateSubscription` |
+| Platform | `rest.webhook.plat-subscription.delete` | `DELETE /webhook/plat/subscriptions/{subscriptionId}` | `WebhookManagement.DeleteSubscription` |
+
+Merchant / platform route keys may map to the same webhook service management RPC method. The account surface split exists so api-gateway can apply different REST route paths, permission decorators, identity extraction, and target merchant scope resolution before invoking the shared webhook capability.
 
 ### List Event Types
 
@@ -257,7 +286,8 @@ Stage 1 subscription management RPC 的 subscription summary / detail output 是
 
 ## Route Ownership
 
-- 商戶後台 REST routes 屬 api-gateway management surface。
+- 商戶 / 平台後台 REST routes 屬 api-gateway management surface。
+- REST RPC route keys 屬 api-gateway REST RPC proxy contract；merchant route keys 使用 `rest.webhook.merch-*`，platform route keys 使用 `rest.webhook.plat-*`。
 - Subscription management RPC 屬 webhook service，供 api-gateway REST RPC proxy 呼叫。
 - 交易服務產生 outbox event 屬 internal webhook production capability。
 - Dispatcher、worker、recovery 屬 webhook service internal orchestration。

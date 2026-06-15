@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -8,16 +8,16 @@ updated_by: Codex
 
 ## Purpose
 
-本文定義 merchant console 前端與 api-gateway 交握時需要的 webhook management REST request / response 草案。
+本文定義 merchant console / platform console 前端與 api-gateway 交握時需要的 webhook management REST request / response 草案。
 
 REST DTO 是前端交握 contract，不等同於 domain object，也不等同於 DB schema。Domain 語意來源見 [`design-domain-model.md`](./design-domain-model.md)；錯誤語意見 [`design-error-contract.md`](./design-error-contract.md)。具體 controller、validation decorator、error mapping、route prefix 與 REST RPC proxy mapping 仍留給 plan 依 codebase pattern 定案。
 
 ## Gateway And RPC Boundary
 
-Merchant console 不直接呼叫 webhook service。第一版管理流程是：
+Merchant console / platform console 不直接呼叫 webhook service。第一版管理流程是：
 
 ```text
-merchant console
+merchant console / platform console
   -> api-gateway REST endpoint
   -> REST RPC proxy
   -> webhook service management RPC
@@ -72,14 +72,32 @@ List sorting：
 
 ## Endpoint Inventory
 
-| Method | Path | 用途 |
+| Method | Merchant path | Platform path | 用途 |
+| --- | --- | --- | --- |
+| `GET` | `/webhook/merch/subscriptions` | `/webhook/plat/subscriptions` | 查詢 webhook subscription 清單。 |
+| `POST` | `/webhook/merch/subscriptions` | `/webhook/plat/subscriptions` | 建立 webhook subscription。 |
+| `GET` | `/webhook/merch/subscriptions/{subscriptionId}` | `/webhook/plat/subscriptions/{subscriptionId}` | 查詢單一 webhook subscription detail。 |
+| `PUT` | `/webhook/merch/subscriptions/{subscriptionId}` | `/webhook/plat/subscriptions/{subscriptionId}` | 覆蓋 callback URL 與訂閱事件集合。 |
+| `DELETE` | `/webhook/merch/subscriptions/{subscriptionId}` | `/webhook/plat/subscriptions/{subscriptionId}` | 軟刪除 webhook subscription。 |
+| `GET` | `/webhook/merch/event-types` | `/webhook/plat/event-types` | 查詢可訂閱的 webhook event type options。 |
+
+下方 endpoint 詳細章節以 merchant path 作為章節標題；同列 platform path 使用相同 request / response shape、validation、error semantics 與 webhook management RPC mapping，只是 account surface、permission code 與 merchant scope 來源不同。
+
+## Permission Semantics
+
+Stage 1 subscription CRUD API 需依 account surface 掛上對應 permission code。Merchant account surface 使用 `/webhook/merch/...`，操作目前登入商戶自己的 webhook subscriptions；platform account surface 使用 `/webhook/plat/...`，操作 merchant webhook subscriptions 時，仍需由 api-gateway 解析目標 merchant scope 後傳給 webhook management RPC。
+
+| Operation | Merchant route + permission | Platform route + permission |
 | --- | --- | --- |
-| `GET` | `/webhook/merch/subscriptions` | 查詢目前商戶的 webhook subscription 清單。 |
-| `POST` | `/webhook/merch/subscriptions` | 建立 webhook subscription。 |
-| `GET` | `/webhook/merch/subscriptions/{subscriptionId}` | 查詢單一 webhook subscription detail。 |
-| `PUT` | `/webhook/merch/subscriptions/{subscriptionId}` | 覆蓋 callback URL 與訂閱事件集合。 |
-| `DELETE` | `/webhook/merch/subscriptions/{subscriptionId}` | 軟刪除 webhook subscription。 |
-| `GET` | `/webhook/merch/event-types` | 查詢可訂閱的 webhook event type options。 |
+| List subscriptions | `GET /webhook/merch/subscriptions` + `merch:webhooks:list` | `GET /webhook/plat/subscriptions` + `plat:merch_webhooks:list` |
+| View subscription | `GET /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:view` | `GET /webhook/plat/subscriptions/{subscriptionId}` + `plat:merch_webhooks:view` |
+| Create subscription | `POST /webhook/merch/subscriptions` + `merch:webhooks:create` | `POST /webhook/plat/subscriptions` + `plat:merch_webhooks:create` |
+| Update subscription | `PUT /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:update` | `PUT /webhook/plat/subscriptions/{subscriptionId}` + `plat:webhooks:update` |
+| Delete subscription | `DELETE /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:delete` | `DELETE /webhook/plat/subscriptions/{subscriptionId}` + `plat:merch_webhooks:delete` |
+
+Stage 1 subscription update uses dedicated update permission codes: merchant route uses `merch:webhooks:update`; platform route uses `plat:webhooks:update`.
+
+`GET /webhook/merch/event-types` 與 `GET /webhook/plat/event-types` 是 subscription form 的輔助讀取 endpoint，不在 subscription CRUD permission code 清單內。若 codebase route convention 要求所有後台 endpoint 皆掛 permission decorator，plan 應沿用該 account surface 的 list 類 permission。
 
 ## Shared DTOs
 
