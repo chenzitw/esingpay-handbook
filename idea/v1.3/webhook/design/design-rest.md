@@ -8,9 +8,9 @@ updated_by: Codex
 
 ## Purpose
 
-本文定義 merchant console / platform console 前端與 api-gateway 交握時需要的 webhook management REST request / response 草案。
+本文定義 merchant console / platform console 與 api-gateway 交握時需要的 webhook management REST contract 語意。
 
-REST DTO 是前端交握 contract，不等同於 domain object，也不等同於 DB schema。Domain 語意來源見 [`design-domain-model.md`](./design-domain-model.md)；錯誤語意見 [`design-error-contract.md`](./design-error-contract.md)。具體 controller、validation decorator、error mapping、route prefix 與 REST RPC proxy mapping 仍留給 plan 依 codebase pattern 定案。
+REST contract 是 account surface 的語意邊界，不等同於 domain object、DB schema 或 codebase DTO class。Domain 語意來源見 [`design-domain-model.md`](./design-domain-model.md)；錯誤語意見 [`design-error-contract.md`](./design-error-contract.md)。具體 controller、validation decorator、error mapping、response envelope、paging DTO 與 REST RPC proxy mapping 由 plan 依 codebase pattern 定案。
 
 ## Gateway And RPC Boundary
 
@@ -20,22 +20,23 @@ Merchant console / platform console 不直接呼叫 webhook service。第一版�
 merchant console / platform console
   -> api-gateway REST endpoint
   -> REST RPC proxy
-  -> webhook service management RPC
+  -> webhook service management capability
 ```
 
-REST endpoint 是前端可見 contract；webhook service 內部落地對應的 RPC method。Api-gateway 負責既有登入驗證與 REST error envelope mapping，webhook service 依 RPC 傳入的 `identity.merchantId` 做 merchant scope。
+REST endpoint 是前端可見 contract；webhook service 內部落地對應的 management capability。Stage 1 codebase plan 採 `contract-rest + RestRpc`，不新增 public `contract-rpc/webhook` namespace。Api-gateway 負責既有登入驗證與 REST error envelope mapping，webhook service 依 api-gateway 傳入的 identity 與 target merchant scope 做 ownership 判斷。
 
-第一版 management RPC 統一信任 api-gateway 的登入驗證與 merchant identity 傳遞；webhook service 不重複驗證 JWT。非 api-gateway caller 是否可呼叫 management RPC 依 codebase 既有 internal RPC access convention 控制。
+第一版 management capability 統一信任 api-gateway 的登入驗證與 merchant/platform identity 傳遞；webhook service 不重複驗證 JWT。非 api-gateway caller 是否可呼叫 management capability 依 codebase 既有 internal access convention 控制。
 
-本文的 response examples 描述 controller handler 回傳的 `data` payload。Api-gateway response interceptor 會依平台既有 convention 將成功 response 包裝成 REST envelope，例如 `{ code, message, data }`。
+本文描述 response payload 語意。實際 HTTP response envelope、paging wrapper、error code primitive 與 field-level validation metadata 由 codebase plan 依既有 REST convention 定案。
 
-REST request / response 欄位應盡量與 webhook management RPC input / output 對齊，避免 gateway 做不必要的語意轉換。
+REST request / response 欄位應盡量與 webhook management capability input / output 對齊，避免 gateway 做不必要的語意轉換。
 
-Merchant scope rules：
+Account scope rules：
 
 - List 只回傳 `merchant_id = identity.merchantId` 且未軟刪除的 subscription。
 - Get / update / delete 必須同時以 `subscriptionId` 與 `merchant_id = identity.merchantId` 查詢。
 - 其他 merchant 即使得知 `subscriptionId`，也不能透過 API 讀取、修改或刪除該 subscription。
+- Platform account surface 代表平台管理 merchant webhook subscriptions；platform list 可依目標 merchant filters 查詢，platform create 需明確帶入 target merchant，platform view / update / delete 依 active subscription id 操作。
 
 ## Naming
 
@@ -61,9 +62,8 @@ Validation rules：
 Pagination rules：
 
 - `page` 預設為 `1`，採 1-based。
-- `pageSize` 預設為 `20`。
-- `pageSize` 最大值暫定為 `100`；超過最大值回傳 pagination validation error。
-- `page` 與 `pageSize` 必須是正整數。
+- Page size 需有預設值與最大值；公開 query parameter 名稱與 codebase paging DTO 對齊。
+- Paging input 必須是正整數；超過最大值或格式不合法時回傳 pagination validation error。
 
 List sorting：
 
@@ -81,29 +81,29 @@ List sorting：
 | `DELETE` | `/webhook/merch/subscriptions/{subscriptionId}` | `/webhook/plat/subscriptions/{subscriptionId}` | 軟刪除 webhook subscription。 |
 | `GET` | `/webhook/merch/event-types` | `/webhook/plat/event-types` | 查詢可訂閱的 webhook event type options。 |
 
-下方 endpoint 詳細章節以 merchant path 作為章節標題；同列 platform path 使用相同 request / response shape、validation、error semantics 與 webhook management RPC mapping，只是 account surface、permission code 與 merchant scope 來源不同。
+下方 endpoint 詳細章節以 merchant path 作為章節標題；同列 platform path 使用相同 request / response 語意、validation 與 error semantics。Platform surface 的 merchant scope 來源不同：list 可帶 merchant filter，create 需帶 target merchant，view / update / delete 以 subscription id 操作 active subscription。
 
 ## Permission Semantics
 
-Stage 1 subscription CRUD API 需依 account surface 掛上對應 permission code。Merchant account surface 使用 `/webhook/merch/...`，操作目前登入商戶自己的 webhook subscriptions；platform account surface 使用 `/webhook/plat/...`，操作 merchant webhook subscriptions 時，仍需由 api-gateway 解析目標 merchant scope 後傳給 webhook management RPC。
+Stage 1 subscription CRUD API 需依 account surface 掛上對應 permission code。Merchant account surface 使用 `/webhook/merch/...`，操作目前登入商戶自己的 webhook subscriptions；platform account surface 使用 `/webhook/plat/...`，操作 merchant webhook subscriptions。
 
 | Operation | Merchant route + permission | Platform route + permission |
 | --- | --- | --- |
 | List subscriptions | `GET /webhook/merch/subscriptions` + `merch:webhooks:list` | `GET /webhook/plat/subscriptions` + `plat:merch_webhooks:list` |
 | View subscription | `GET /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:view` | `GET /webhook/plat/subscriptions/{subscriptionId}` + `plat:merch_webhooks:view` |
 | Create subscription | `POST /webhook/merch/subscriptions` + `merch:webhooks:create` | `POST /webhook/plat/subscriptions` + `plat:merch_webhooks:create` |
-| Update subscription | `PUT /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:update` | `PUT /webhook/plat/subscriptions/{subscriptionId}` + `plat:webhooks:update` |
+| Update subscription | `PUT /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:update` | `PUT /webhook/plat/subscriptions/{subscriptionId}` + `plat:merch_webhooks:update` |
 | Delete subscription | `DELETE /webhook/merch/subscriptions/{subscriptionId}` + `merch:webhooks:delete` | `DELETE /webhook/plat/subscriptions/{subscriptionId}` + `plat:merch_webhooks:delete` |
 
-Stage 1 subscription update uses dedicated update permission codes: merchant route uses `merch:webhooks:update`; platform route uses `plat:webhooks:update`.
+Stage 1 subscription update uses dedicated update permission codes: merchant route uses `merch:webhooks:update`; platform route uses `plat:merch_webhooks:update`.
 
 `GET /webhook/merch/event-types` 與 `GET /webhook/plat/event-types` 是 subscription form 的輔助讀取 endpoint，不在 subscription CRUD permission code 清單內。若 codebase route convention 要求所有後台 endpoint 皆掛 permission decorator，plan 應沿用該 account surface 的 list 類 permission。
 
-## Shared DTOs
+## Management Read Models
 
-Subscription summary / detail DTO 是 management read model，不是 `WebhookSubscription` domain object 本體。`eventTypeCount` 與 `eventTypes` 都由 `webhook_subscription_event_type` binding 與 code-defined event catalog 組裝。
+Subscription summary / detail 是 management read model，不是 `WebhookSubscription` domain object 本體。`eventTypeCount` 與 `eventTypes` 都由 subscription-event binding 與 code-defined event catalog 組裝。具體 DTO class 名稱、decorator、serialization 與 response envelope 由 plan 定案。
 
-### WebhookEventTypeOptionDto
+### Event Type Option
 
 | Field | Type | Required | 說明 |
 | --- | --- | --- | --- |
@@ -121,7 +121,7 @@ Subscription summary / detail DTO 是 management read model，不是 `WebhookSub
 }
 ```
 
-### WebhookSubscriptionSummaryDto
+### Subscription Summary
 
 | Field | Type | Required | 說明 |
 | --- | --- | --- | --- |
@@ -131,13 +131,13 @@ Subscription summary / detail DTO 是 management read model，不是 `WebhookSub
 | `createdAt` | `IsoDateTimeUtc` | yes | 建立時間。 |
 | `updatedAt` | `IsoDateTimeUtc` | yes | 最後更新時間。 |
 
-### WebhookSubscriptionDetailDto
+### Subscription Detail
 
 | Field | Type | Required | 說明 |
 | --- | --- | --- | --- |
 | `id` | `string` | yes | Subscription 識別碼。 |
 | `endpointUrl` | `string` | yes | Callback URL。 |
-| `eventTypes` | `WebhookEventTypeOptionDto[]` | yes | 已訂閱事件清單；由 binding join code-defined catalog 組裝。 |
+| `eventTypes` | event type option list | yes | 已訂閱事件清單；由 binding join code-defined catalog 組裝。 |
 | `createdAt` | `IsoDateTimeUtc` | yes | 建立時間。 |
 | `updatedAt` | `IsoDateTimeUtc` | yes | 最後更新時間。 |
 
@@ -145,7 +145,7 @@ Subscription summary / detail DTO 是 management read model，不是 `WebhookSub
 
 查詢系統支援且可供商戶訂閱的 event type options。後端從 TypeScript code-defined catalog 回傳資料；前端建立與編輯 subscription 時都應使用此 endpoint 取得 checkbox options，不應在前端 hard-code event list。
 
-Response：
+Response payload contains event type options. Actual REST envelope follows codebase convention.
 
 ```json
 {
@@ -186,31 +186,14 @@ Query：
 | Field | Type | Required | 說明 |
 | --- | --- | --- | --- |
 | `page` | `number` | no | 1-based 頁碼；預設 `1`。 |
-| `pageSize` | `number` | no | 每頁筆數；預設 `20`，最大 `100`。 |
+| page size parameter | `number` | no | 每頁筆數；具體 parameter 名稱、預設值與 alias 由 codebase plan 對齊既有 paging convention。 |
 
 Sorting：
 
 - 預設排序為 `createdAt desc, id desc`。
 - 第一版不提供自訂排序參數。
 
-Response：
-
-```json
-{
-  "items": [
-    {
-      "id": "101",
-      "endpointUrl": "https://merchant.example.com/webhooks/esingpay",
-      "eventTypeCount": 4,
-      "createdAt": "2026-06-10T02:00:00.000Z",
-      "updatedAt": "2026-06-10T02:10:00.000Z"
-    }
-  ],
-  "page": 1,
-  "pageSize": 20,
-  "total": 1
-}
-```
+Response payload contains subscription summaries plus paging metadata. Actual list envelope follows codebase plan and existing REST paging convention.
 
 ## POST `/webhook/merch/subscriptions`
 
@@ -220,10 +203,10 @@ Operation semantics：
 
 - 驗證並 trim `endpointUrl`。
 - 驗證 `eventKeys` 為陣列、無重複、全部存在於 code-defined event catalog；允許空陣列。
-- 建立 `webhook_subscription` row。
-- 依 request `eventKeys` 建立 `webhook_subscription_event_type` rows；若 `eventKeys` 為空陣列，則不建立 binding rows。
+- 建立 webhook subscription。
+- 依 request `eventKeys` 建立 subscription-event bindings；若 `eventKeys` 為空陣列，則不建立 bindings。
 - Subscription 建立與 binding insert 應在同一 transaction 或等效一致性邊界內完成。
-- Response 回傳 `WebhookSubscriptionDetailDto`，其中 `eventTypes` 由 binding join code-defined catalog 組裝，並依 `sortOrder` 排序。
+- Response 回傳 subscription detail read model，其中 `eventTypes` 由 binding join code-defined catalog 組裝，並依 `sortOrder` 排序。
 
 Request：
 
@@ -245,7 +228,7 @@ Request：
 }
 ```
 
-Response：`WebhookSubscriptionDetailDto`
+Response：subscription detail read model
 
 ```json
 {
@@ -286,7 +269,7 @@ Validation：
 
 後端查詢必須同時套用目前 identity 的 merchant id scope；不得只用 `subscriptionId` 查詢。
 
-Response：`WebhookSubscriptionDetailDto`
+Response：subscription detail read model
 
 ```json
 {
@@ -312,9 +295,9 @@ Response：`WebhookSubscriptionDetailDto`
 
 Operation semantics：
 
-- 更新 `webhook_subscription.endpoint_url`。
-- 刪除該 subscription 既有的 `webhook_subscription_event_type` rows。
-- 依 request `eventKeys` 重新 insert `webhook_subscription_event_type` rows；若 `eventKeys` 為空陣列，則不重新 insert binding rows，代表取消所有事件訂閱但保留 subscription。
+- 更新 subscription endpoint URL。
+- 刪除該 subscription 既有 event bindings。
+- 依 request `eventKeys` 重新建立 event bindings；若 `eventKeys` 為空陣列，則不建立 bindings，代表取消所有事件訂閱但保留 subscription。
 - URL 更新與 binding replacement 應在同一個 transaction 或等效一致性邊界內完成，避免 endpoint 已改但 event binding 未完成，或反向不一致。
 
 Request：
@@ -339,7 +322,7 @@ Request：
 }
 ```
 
-Response：`WebhookSubscriptionDetailDto`
+Response：subscription detail read model
 
 Validation：
 
@@ -357,8 +340,8 @@ Operation semantics：
 
 - 以 `subscriptionId + identity.merchantId` 查詢未刪除 subscription。
 - 找不到、已刪除或不屬於目前 merchant 時，錯誤語意使用 not found。
-- Soft delete 同步更新 `deleted_at` 與 `updated_at`。
-- Soft delete 不刪除 `webhook_subscription_event_type` rows；dispatcher 查詢必須排除 deleted subscription。
+- Soft delete 同步更新 deletion marker 與 update time。
+- Soft delete 不刪除 subscription-event bindings；dispatcher 查詢必須排除 deleted subscription。
 
 Response：
 

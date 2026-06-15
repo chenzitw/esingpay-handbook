@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -18,6 +18,8 @@ updated_by: Codex
 
 後台不管理 webhook event type。事件選項由後端 TypeScript code-defined event type catalog 提供。
 
+Frontend implementation is a separate handoff. This handbook design defines the expected management capability and UX states; concrete frontend route, component, API client and state-management work should be planned after the target frontend repo is confirmed.
+
 ## Expected States
 
 Subscription list：
@@ -25,7 +27,7 @@ Subscription list：
 - Loading：首次載入與刪除後刷新時需呈現載入狀態。
 - Empty：商戶尚未建立 subscription 時，清單顯示空狀態並提供建立入口。
 - Error：查詢失敗時顯示可理解錯誤，並保留重試入口。
-- Pagination：若資料超過一頁，依 API 回傳 paging metadata 顯示分頁控制。
+- Pagination：若資料超過一頁，依 API 回傳 paging metadata 顯示分頁控制；具體 response envelope 與 query parameter 名稱依 codebase plan。
 
 Create / edit form：
 

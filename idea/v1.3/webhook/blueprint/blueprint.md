@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -8,13 +8,13 @@ updated_by: Codex
 
 ## Context
 
-本 blueprint 承接 [`../design/design.md`](../design/design.md)，只負責把 webhook 交易事件推播拆成可落地的 stage 序列、phase、依賴與估時。跨 stage 的 API、RPC、persistence、queue、payload、service boundary 等 contract 由 design 文件維護。
+本 blueprint 承接 [`../design/design.md`](../design/design.md)，只負責把 webhook 交易事件推播拆成可落地的 stage 序列、phase、依賴與估時。跨 stage 的 API、management transport、persistence、queue、payload、service boundary 等 contract 由 design 文件維護。
 
 主要設計來源：
 
-- [`../design/design-rest.md`](../design/design-rest.md)：merchant-facing REST contract。
-- [`../design/design-rpc.md`](../design/design-rpc.md)：webhook service RPC surface。
-- [`../design/design-persistence-model.md`](../design/design-persistence-model.md)：conceptual table / index model。
+- [`../design/design-rest.md`](../design/design-rest.md)：merchant / platform management REST contract semantics。
+- [`../design/design-rpc.md`](../design/design-rpc.md)：webhook service management transport boundary。
+- [`../design/design-persistence-model.md`](../design/design-persistence-model.md)：conceptual persistence model and query support requirements。
 - [`../design/design-queue-topology.md`](../design/design-queue-topology.md)：queue topics、payloads、dispatcher / worker / recovery flow。
 - [`../design/design-payload-contract.md`](../design/design-payload-contract.md)：outbound webhook payload contract。
 - [`../design/design-service-boundary.md`](../design/design-service-boundary.md)：ownership 與 service boundary。
@@ -35,7 +35,7 @@ In scope：
 - Webhook subscription 與 event type key 的多對多關係。
 - Webhook outbox event 與 webhook delivery 的拆表模型。
 - Dispatcher / worker / recovery scheduler 的方向性流程。
-- Internal RPC surface 與服務 ownership。
+- Internal capability / management transport surface 與服務 ownership。
 - Queue topic 與 consumer topology。
 - Webhook POST payload 第一版 envelope。
 - Stage / phase 拆分與初步開發估時。
@@ -63,8 +63,8 @@ Out of scope：
 跨 stage 共同決策集中於 design 文件：
 
 - API route 與 event catalog read model 見 [`../design/design-rest.md`](../design/design-rest.md)。
-- 資料表命名、ID/time strategy、status 與欄位 inventory 見 [`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
-- Internal capability 邊界與 RPC surface 見 [`../design/design-rpc.md`](../design/design-rpc.md)。
+- Persistence naming、identifier/time semantics、status 與 query support requirements 見 [`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
+- Internal capability 邊界與 management transport surface 見 [`../design/design-rpc.md`](../design/design-rpc.md)。
 - Domain/service/module 命名與 ownership 見 [`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
 - Queue topic、worker topology 與 recovery 方向見 [`../design/design-queue-topology.md`](../design/design-queue-topology.md)。
 - POST payload envelope 與 event-specific data shape 見 [`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
@@ -73,24 +73,25 @@ Out of scope：
 
 ### Stage 1：Subscription Management And Event Catalog
 
-建立 webhook subscription、code-defined event type catalog、subscription-event relation 的 persistence 與商戶後台管理 API。
+建立 webhook subscription、code-defined event type catalog、subscription-event relation 的 backend persistence 與 management API。
 
 詳細 blueprint：[`blueprint-stage-1.md`](./blueprint-stage-1.md)
 
 Stage 1 已拆成多個 phase：
 
-- Phase 1：New service boundary and implementation convention。
-- Phase 2：Persistence schema and event catalog。
+- Phase 1：Boundary and codebase convention。
+- Phase 2：Persistence foundation and event catalog。
 - Phase 3：Event type read and validation capability。
-- Phase 4：Subscription read APIs and merchant scope baseline。
-- Phase 5：Subscription write APIs and transaction boundaries。
-- Phase 6：Merchant console frontend integration。
-- Phase 7：Stage 1 verification and tests。
+- Phase 4：Subscription read surface and scope baseline。
+- Phase 5：Subscription write surface and consistency boundary。
+- Phase 6：Backend verification。
+- Phase 7：Handoff and design sync。
 
 完成後應能支援：
 
 - 商戶建立、查詢、修改、刪除 webhook subscription。
 - 後端以 code-defined event type catalog 作為 UI checkbox 與訂閱校驗來源。
+- Frontend implementation handoff notes are available for a later frontend plan；frontend code is not part of the current backend Stage 1 plan set。
 
 ### Stage 2：Outbox Event Production
 
@@ -184,7 +185,7 @@ Parallelism：
 
 | Stage | 估時 | 依據 |
 | --- | ---: | --- |
-| Stage 1 | 6 天 | 新資料模型、code-defined event catalog、event type read endpoint、subscription CRUD、merchant console 串接、subscription-event relation 與商戶 scope 驗證。 |
+| Stage 1 | 6 天 | 新資料模型、code-defined event catalog、event type read endpoint、subscription CRUD、subscription-event relation、商戶/platform scope 與 backend 驗證。 |
 | Stage 2 | 3 天 | 需要接 withdrawal / deposit 狀態變更點與 payload envelope；若既有 event/hook pattern 不足，估時可能增加。 |
 | Stage 3 | 4 天 | Dispatcher polling、subscription matching、delivery creation、queue publishing 與 outbox 狀態轉換需一起驗證。 |
 | Stage 4 | 5 天 | Worker lock、HTTP POST、signature secret、timeout recovery 與失敗狀態處理未知較高。 |

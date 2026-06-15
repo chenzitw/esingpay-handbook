@@ -4,29 +4,29 @@ updated_at: 2026-06-15
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — RPC Design
+# Webhook 交易事件推播 — Management Transport Design
 
 ## Purpose
 
-本文件鎖定 webhook 第一版 internal service-to-service capability，以及 api-gateway REST RPC proxy 對 webhook management RPC 的 route key 命名。Merchant / platform 後台 REST API 見 [`design-rest.md`](./design-rest.md)。
+本文件鎖定 webhook 第一版 internal service-to-service capability，以及 api-gateway 透過 REST RPC proxy 呼叫 webhook management capability 的邊界。Merchant / platform 後台 REST API 見 [`design-rest.md`](./design-rest.md)。
 
-具體 contract-rpc 檔案位置、method name、input/output DTO 型別與 error mapping 留給 plan 依 codebase convention 決定。
+Stage 1 codebase plan 採 `contract-rest + RestRpc` 作為 gateway-to-cradle management transport，不新增 public `contract-rpc/webhook` namespace。具體檔案位置、method name、input/output DTO 型別與 error mapping 留給 plan 依 codebase convention 決定。
 
 ## Capability Boundary
 
 Webhook 是交易事件推播能力的 owner。Withdrawal / deposit 服務不應直接建立 delivery 或呼叫商戶 endpoint；它們只需要向 webhook capability 表達「某交易事件已發生」。
 
-Merchant console / platform console 不直接呼叫 webhook service。後台管理 flow 由 api-gateway 暴露 REST route，再透過 REST RPC proxy 呼叫 webhook service management RPC：
+Merchant console / platform console 不直接呼叫 webhook service。後台管理 flow 由 api-gateway 暴露 REST route，再透過 REST RPC proxy 呼叫 webhook service management capability：
 
 ```text
 merchant console / platform console
   -> api-gateway REST
   -> REST RPC proxy route
-  -> webhook service management RPC
+  -> webhook service management capability
   -> webhook subscription persistence
 ```
 
-第一版 management RPC 統一信任 api-gateway 已完成登入驗證，並信任 api-gateway 傳入的 `identity.merchantId` 作為 merchant scope 來源。Webhook service 不重複驗證 JWT；非 api-gateway caller 的 access control 依 codebase 既有 internal RPC convention 控制。
+第一版 management capability 統一信任 api-gateway 已完成登入驗證，並信任 api-gateway 傳入的 account identity 與 target merchant scope。Webhook service 不重複驗證 JWT；非 api-gateway caller 的 access control 依 codebase 既有 internal convention 控制。
 
 概念邊界：
 
@@ -51,15 +51,15 @@ webhook delivery worker
   -> delivery status update
 ```
 
-## Conceptual RPC Capabilities
+## Conceptual Management Capabilities
 
-Stage 1 subscription management RPC 的 subscription summary / detail output 是 management read model。`eventTypeCount` 與 `eventTypes` 由 `webhook_subscription_event_type` binding 與 code-defined event catalog 組裝，不是 `WebhookSubscription` 本體欄位。
+Stage 1 subscription management capability 的 subscription summary / detail output 是 management read model。`eventTypeCount` 與 `eventTypes` 由 subscription-event binding 與 code-defined event catalog 組裝，不是 `WebhookSubscription` 本體欄位。
 
-## Stage 1 Management RPC Method Inventory
+## Stage 1 Management Capability Inventory
 
-以下 method name 是 design-level naming anchor，最終 contract-rpc service name 與檔案位置留給 plan 依 codebase convention 定案。
+以下 capability names 是 design-level naming anchors，最終 service method、RestRpc method 與檔案位置留給 plan 依 codebase convention 定案。
 
-| Conceptual method | Purpose |
+| Conceptual capability | Purpose |
 | --- | --- |
 | `WebhookManagement.ListEventTypes` | 查詢 code-defined event type options。 |
 | `WebhookManagement.ListSubscriptions` | 查詢目前 merchant 的 subscription list。 |
@@ -70,7 +70,7 @@ Stage 1 subscription management RPC 的 subscription summary / detail output 是
 
 ## Stage 1 REST RPC Route Keys
 
-以下 route key 是 api-gateway REST RPC proxy 與 webhook service REST RPC adapter 之間的 naming anchor。它們不同於 conceptual `WebhookManagement.*` method name；plan 可依 codebase convention 決定實際檔案與 typed API 定義位置，但 route key 語意需保持穩定。
+以下 route key 是 api-gateway REST RPC proxy 與 webhook service REST RPC adapter 之間的 naming anchor。它們不同於 conceptual `WebhookManagement.*` capability name；plan 可依 codebase convention 決定實際檔案與 typed API 定義位置，但 route key 語意需保持穩定。
 
 命名規則：
 
@@ -111,7 +111,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 決策：
 
 - Event type options 來源是 webhook service 的 code-defined catalog。
-- Output 欄位應對齊 REST `WebhookEventTypeOptionDto`。
+- Output 欄位應對齊 REST event type option read model。
 
 ### List Subscriptions
 
@@ -121,6 +121,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 - `identity.merchantId`
 - paging input
+- platform surface 可帶 target merchant filters
 
 概念 output：
 
@@ -129,11 +130,12 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 ### Create Subscription
 
-用途：建立目前商戶名下 webhook subscription。
+用途：建立 webhook subscription。Merchant surface 使用目前登入 merchant；platform surface 需提供 target merchant。
 
 概念 input：
 
 - `identity.merchantId`
+- target merchant scope（platform surface）
 - `endpointUrl`
 - `eventKeys`
 
@@ -149,7 +151,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 ### Get Subscription
 
-用途：查詢目前商戶名下單一 webhook subscription detail。
+用途：查詢單一 webhook subscription detail。Merchant surface 必須限制在目前 merchant；platform surface 可依 active subscription id 查詢。
 
 概念 input：
 
@@ -163,10 +165,11 @@ Merchant / platform route keys may map to the same webhook service management RP
 決策：
 
 - Lookup 必須使用 `subscriptionId + identity.merchantId`，不能只用 `subscriptionId` 查詢。
+- Platform surface 不使用登入 merchant ownership 作為限制，但仍只能查 active subscription。
 
 ### Update Subscription
 
-用途：覆蓋目前商戶名下 webhook subscription 的 endpoint URL 與訂閱事件集合。
+用途：覆蓋 webhook subscription 的 endpoint URL 與訂閱事件集合。Merchant surface 必須限制在目前 merchant；platform surface 可依 active subscription id 更新。
 
 概念 input：
 
@@ -184,12 +187,13 @@ Merchant / platform route keys may map to the same webhook service management RP
 - Update 採完整覆蓋語意，`eventKeys` 取代既有 relation 集合。
 - `eventKeys` 可為空陣列；空陣列表示刪除所有 event bindings 但保留 subscription。
 - Lookup / update 必須使用 `subscriptionId + identity.merchantId`，不能只用 `subscriptionId` 更新。
-- Update 需更新 `webhook_subscription.endpoint_url`，並以 delete existing bindings + insert request event keys 的方式重建 `webhook_subscription_event_type`。
+- Platform surface 不使用登入 merchant ownership 作為限制，但仍只能更新 active subscription。
+- Update 需更新 subscription endpoint URL，並以 replace bindings 的方式使 request event keys 成為完整訂閱集合。
 - Endpoint URL 更新與 binding replacement 應在同一 transaction 或等效一致性邊界內完成。
 
 ### Delete Subscription
 
-用途：軟刪除目前商戶名下 webhook subscription。
+用途：軟刪除 webhook subscription。Merchant surface 必須限制在目前 merchant；platform surface 可依 active subscription id 刪除。
 
 概念 input：
 
@@ -203,6 +207,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 決策：
 
 - Delete 必須使用 `subscriptionId + identity.merchantId`，不能只用 `subscriptionId` 軟刪除。
+- Platform surface 不使用登入 merchant ownership 作為限制，但仍只能刪除 active subscription。
 
 ### Produce Webhook Event
 
@@ -288,14 +293,14 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 - 商戶 / 平台後台 REST routes 屬 api-gateway management surface。
 - REST RPC route keys 屬 api-gateway REST RPC proxy contract；merchant route keys 使用 `rest.webhook.merch-*`，platform route keys 使用 `rest.webhook.plat-*`。
-- Subscription management RPC 屬 webhook service，供 api-gateway REST RPC proxy 呼叫。
+- Subscription management capability 屬 webhook service，供 api-gateway REST RPC proxy 呼叫。
 - 交易服務產生 outbox event 屬 internal webhook production capability。
 - Dispatcher、worker、recovery 屬 webhook service internal orchestration。
-- 若需要 gateway 或其他服務呼叫 webhook internal capability，應走 contract-rpc，而不是直接 import webhook module internals。
+- 若 Stage 2+ 需要 gateway 以外的服務跨 bounded context 呼叫 webhook internal capability，應在 plan 中決定是否提升為 contract-rpc，而不是直接 import webhook module internals。
 
 ## Stage Relationship
 
-- Stage 1 需要 subscription management RPC，供 api-gateway REST RPC proxy 呼叫；不需要 producer RPC。
+- Stage 1 需要 subscription management capability，供 api-gateway REST RPC proxy 呼叫；不需要 producer RPC。
 - Stage 2 決定並落地 produce webhook event capability。
 - Stage 3 需要 dispatcher 使用 subscription matching 與 delivery creation capability。
 - Stage 4 需要 delivery execution 與 recovery capability。

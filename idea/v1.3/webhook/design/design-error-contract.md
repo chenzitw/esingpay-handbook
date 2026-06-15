@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -8,9 +8,9 @@ updated_by: Codex
 
 ## Purpose
 
-本文定義 webhook Stage 1 subscription management 的錯誤語意，供 api-gateway REST route、REST RPC proxy、webhook service management RPC 與 merchant console 共用。
+本文定義 webhook Stage 1 subscription management 的錯誤語意，供 api-gateway REST route、REST RPC proxy、webhook service management capability 與 merchant console 共用。
 
-本文只定義錯誤場景、穩定 error code、建議 HTTP status 與使用者可理解訊息。不定義 exception class、RPC enum 檔案位置、REST error envelope 形狀或 i18n 實作方式。
+本文只定義錯誤場景、穩定 error code 語意、建議 HTTP status 與使用者可理解訊息。不定義 exception class、codebase enum 檔案位置、REST error envelope 形狀或 i18n 實作方式。Codebase 可依既有 convention 將概念 code 映射為 resource-scoped string enum。
 
 ## Error Boundary
 
@@ -18,7 +18,7 @@ updated_by: Codex
 merchant console
   -> api-gateway REST
   -> REST RPC proxy
-  -> webhook service management RPC
+  -> webhook service management capability
 ```
 
 Webhook service owns domain validation and merchant scope checks. Api-gateway owns REST status / envelope mapping.
@@ -37,7 +37,7 @@ REST 與 RPC 的 error code 應保持同一組穩定 code，避免 gateway 做�
 | `subscriptionId` malformed | `WEBHOOK_SUBSCRIPTION_ID_INVALID` | 400 | Subscription id is invalid. |
 | Subscription not found, deleted, or not owned by merchant | `WEBHOOK_SUBSCRIPTION_NOT_FOUND` | 404 | Webhook subscription was not found. |
 | Pagination input malformed | `WEBHOOK_PAGINATION_INVALID` | 400 | Pagination parameters are invalid. |
-| `pageSize` exceeds maximum | `WEBHOOK_PAGE_SIZE_EXCEEDED` | 400 | Page size exceeds the maximum allowed value. |
+| Page size exceeds maximum | `WEBHOOK_PAGE_SIZE_EXCEEDED` | 400 | Page size exceeds the maximum allowed value. |
 | Unexpected persistence or transaction failure | `WEBHOOK_SUBSCRIPTION_OPERATION_FAILED` | 500 | Webhook subscription operation failed. |
 
 ## Merchant Scope Failure
@@ -62,4 +62,3 @@ Rationale:
 
 - Whether error messages are returned directly from backend or mapped to locale-specific frontend copy.
 - Whether validation errors include field-level metadata such as `field: "eventKeys"`.
-- Final REST error envelope shape and RPC error enum location.

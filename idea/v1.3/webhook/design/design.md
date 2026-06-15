@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -39,15 +39,15 @@ Out of scope：
 ## Design Map
 
 - [`design-domain-model.md`](./design-domain-model.md)：webhook subscription、event type、outbox event、delivery 的概念模型與 persistence principles。
-- [`design-persistence-model.md`](./design-persistence-model.md)：webhook 第一版資料表、欄位、index 與 stage relationship 的 conceptual schema shape。
+- [`design-persistence-model.md`](./design-persistence-model.md)：webhook 第一版 persistence backing、關聯與查詢支援需求的 conceptual schema shape；具體 DB 型別、index 與 migration 由 plan 定案。
 - [`design-service-boundary.md`](./design-service-boundary.md)：webhook capability ownership、service boundary、anti-patterns。
-- [`design-management-surface.md`](./design-management-surface.md)：商戶後台第一版 webhook subscription 管理能力。
-- [`design-rest.md`](./design-rest.md)：merchant console 前端與後端交握的 REST request / response 草案。
-- [`design-rpc.md`](./design-rpc.md)：api-gateway REST RPC proxy 與 webhook service internal capability 的 RPC surface。
+- [`design-management-surface.md`](./design-management-surface.md)：商戶後台第一版 webhook subscription 管理能力與 frontend handoff。
+- [`design-rest.md`](./design-rest.md)：merchant / platform management surface 的 REST contract 語意；codebase envelope、DTO class 與 validator 細節由 plan 定案。
+- [`design-rpc.md`](./design-rpc.md)：api-gateway REST RPC proxy 與 webhook service internal capability 的 management transport boundary。
 - [`design-error-contract.md`](./design-error-contract.md)：subscription management 的錯誤語意、穩定 error code 與 REST/RPC mapping 邊界。
 - [`design-dispatch-flow.md`](./design-dispatch-flow.md)：交易事件轉 outbox、dispatcher 建立 delivery、worker 派送與 recovery 的流程約束。
 - [`design-queue-topology.md`](./design-queue-topology.md)：domain event notification queue 與 webhook delivery execution queue 的 topic / payload 討論基礎。
-- [`design-type-contract.md`](./design-type-contract.md)：後續 domain raw、event contract、request / response DTO 型別定義的設計入口。
+- [`design-type-contract.md`](./design-type-contract.md)：domain raw、event contract、management read model 與 internal DTO boundary 的設計入口；具體 TypeScript 型別由 plan 定案。
 - [`design-payload-contract.md`](./design-payload-contract.md)：POST 到商戶 endpoint 的 webhook payload envelope 與 event-specific data shape。
 
 ## Open Points
@@ -56,6 +56,5 @@ Out of scope：
 - Delivery 失敗後的重試策略。
 - Outbox event 何時標記為完成處理。
 - Fund / transaction domain event notification topic 的實際拆分與命名。
-- REST/RPC error envelope 的最終格式。
 - 是否需要提供商戶查詢 delivery history。
 - 是否需要提供管理端人工重送 delivery。

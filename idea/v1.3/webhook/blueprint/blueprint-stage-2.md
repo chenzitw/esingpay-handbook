@@ -31,7 +31,7 @@ Out of scope：
 ## Inputs
 
 - Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
-- RPC surface：[`../design/design-rpc.md`](../design/design-rpc.md)。
+- Management transport / capability boundary：[`../design/design-rpc.md`](../design/design-rpc.md)。
 - Service boundary：[`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
 - Payload contract：[`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
 

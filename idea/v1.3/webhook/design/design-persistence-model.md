@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -8,7 +8,7 @@ updated_by: Codex
 
 ## Purpose
 
-本文件鎖定 webhook 第一版跨 phase 共用的 conceptual schema shape。這不是 final DB schema；具體 SQL、ORM mapping、index name、migration 檔案與欄位型別細節留給 plan。
+本文件鎖定 webhook 第一版跨 phase 共用的 conceptual persistence shape。這不是 final DB schema；具體 SQL、ORM mapping、index name、migration 檔案、欄位型別、PK/FK 寫法與實際 index 定義留給 plan。
 
 ## Naming
 
@@ -21,12 +21,12 @@ updated_by: Codex
 - 來源交易資料追蹤使用 `resource_type` / `resource_identifier`。
 - 實際推播任務稱為 `webhook_delivery`。
 
-## ID And Time Strategy
+## Identifier And Time Semantics
 
-- 資料表自身 `id` 與 FK 欄位使用 bigint。
-- `merchant_id` 保持 string，對齊既有 merchant UUID 設計。
-- `resource_identifier` 若對應 withdrawal / deposit 主表 ID，使用 bigint。
-- 時間欄位使用 PostgreSQL `timestamptz`。
+- Webhook persistence record 需要有穩定內部識別值，對外 management API 使用平台 short id string representation。
+- `merchant_id` 對齊既有 merchant identity 語意，作為 subscription ownership 與 dispatcher matching 的主要 scope。
+- `resource_identifier` 表示 withdrawal / deposit 等來源交易主體識別值，實際 primitive 由對應交易模型與 plan 決定。
+- 時間欄位需保留具時區語意，讓 list sorting、delivery snapshot 與 recovery 判斷可穩定運作。
 
 ## Subscription State
 
@@ -60,13 +60,13 @@ Catalog 草稿事件：
 - 若沒有訂閱者，dispatcher 不建立 delivery，並將 outbox event 標記為 `DISPATCHED`，表示該事件已完成 dispatcher 處理。
 - Delivery 保存派送當下的 `endpoint_url` 與 `payload` snapshot，避免 subscription 或 outbox 後續變更造成歷史紀錄失真。
 
-## Table Inventory
+## Conceptual Persistence Inventory
 
 ### `webhook_subscription`
 
 用途：記錄商戶登記的 webhook endpoint。
 
-欄位：
+概念欄位：
 
 - `id`
 - `merchant_id`
@@ -84,25 +84,23 @@ Catalog 草稿事件：
 
 用途：記錄某個 webhook subscription 訂閱了哪些事件類型。
 
-欄位：
+概念欄位：
 
-- `webhook_subscription_id`（PK 一部分）
-- `event_type`（PK 一部分，保存 event key 字串）
+- `webhook_subscription_id`
+- `event_type`（保存 event key 字串）
 - `created_at`
-
-主鍵：composite PK `(webhook_subscription_id, event_type)`，不另設 own `id` 欄位。
 
 約束：
 
-- 同一 subscription 不可重複訂閱同一 event type（由 composite PK 保證）。
+- 同一 subscription 不可重複訂閱同一 event type；實際以 composite key、unique constraint 或等效 repository 保護由 plan 定案。
 - `event_type` 必須存在於 code-defined webhook event type catalog；DB 層不建立 event type FK。
-- FK 指向 `webhook_subscription`。
+- Relation 指向 `webhook_subscription`。
 
 ### `webhook_outbox_event`
 
 用途：記錄業務服務已產生、等待 webhook dispatcher 處理的一筆交易事件。
 
-欄位：
+概念欄位：
 
 - `id`
 - `event_type`
@@ -131,7 +129,7 @@ Catalog 草稿事件：
 
 用途：記錄某一筆 outbox event 對某一個 subscription endpoint 的實際推播任務與結果。
 
-欄位：
+概念欄位：
 
 - `id`
 - `outbox_event_id`
@@ -153,29 +151,21 @@ Catalog 草稿事件：
 
 約束：
 
-- `outbox_event_id` 對應 `webhook_outbox_event.id`。
-- `webhook_subscription_id` 對應 `webhook_subscription.id`。
+- `outbox_event_id` 對應一筆 webhook outbox event。
+- `webhook_subscription_id` 對應派送建立當下的 subscription。
 - `endpoint_url` 保存派送當下的 URL snapshot。
 - `payload` 保存派送當下的 payload snapshot。
 - Worker 必須透過狀態轉換鎖定 delivery，避免多 worker 重複處理同一任務。
 
-## Index Inventory (Stage 1)
+## Query Support Requirements
 
-以下為 Stage 1 migration 所需最小 index 集合。具體 index name 與 migration 語法留給 plan。
+Plan 需讓 persistence 支援以下查詢與一致性需求；實際 index、constraint、migration 語法與命名由 codebase plan 定案。
 
-### `webhook_subscription`
-
-| Index | Type | 用途 |
-| --- | --- | --- |
-| `(merchant_id, deleted_at)` | B-tree | Merchant scope query：快速篩出特定商戶的有效 subscription。 |
-| `(merchant_id, endpoint_url)` | B-tree | Optional query support；不是唯一性約束，同商戶可重複建立相同 endpoint。 |
-
-### `webhook_subscription_event_type`
-
-| Index | Type | 用途 |
-| --- | --- | --- |
-| `(webhook_subscription_id, event_type)` | Composite PK | 重複訂閱防護，兼作 subscription → event type 正向查詢 index。 |
-| `(event_type)` | B-tree | 反向查詢：依 event type 找出訂閱中的 subscription；Stage 3 dispatcher 使用。 |
+- 依 merchant scope 查詢未刪除 subscription。
+- 依 subscription 找出其訂閱的 event type keys。
+- 防止同一 subscription 重複綁定同一 event key。
+- 依 event type 反向找出訂閱者，供 Stage 3 dispatcher matching 使用。
+- 支援同一 merchant 建立多筆相同 endpoint URL 的 subscription；不得用唯一性約束阻止此行為。
 
 ## Stage Relationship
 

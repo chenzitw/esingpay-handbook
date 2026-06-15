@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-15
 updated_by: Codex
 ---
 
@@ -8,17 +8,17 @@ updated_by: Codex
 
 ## Purpose
 
-本文作為 webhook 型別定義設計入口。後續可在此拆分或補充 domain raw、event contract、request / response DTO 等型別設計。
+本文作為 webhook 型別邊界設計入口。後續可在此拆分或補充 domain raw、event contract、management read model 與 delivery internal DTO 等型別設計。
 
 本文先定義 withdrawal / deposit 交易事件在 webhook 服務內部需要接收的 domain raw family，以及第一版 event key 對應關係。Domain raw 是 payload builder 的輸入，不等同於最終 DB schema、ORM entity、REST DTO 或對外 webhook payload。
 
-具體 TypeScript 型別、validation decorator、序列化格式與檔案位置留給 blueprint / plan 依新服務實作慣例定案。
+具體 TypeScript 型別、class / interface 名稱、validation decorator、序列化格式與檔案位置留給 plan 依新服務實作慣例定案。
 
 ## Type Layers
 
 - Domain raw：內部交易服務產生 webhook event 前的原始 domain input。
 - Event contract：POST 到商戶 endpoint 的 external-facing payload envelope 與 event-specific data。
-- Management DTO：商戶後台管理 webhook subscription 與查詢 event type catalog 的 request / response DTO，REST 草案見 [`design-rest.md`](./design-rest.md)。
+- Management read model：商戶後台管理 webhook subscription 與查詢 event type catalog 的 request / response 語意，REST contract 見 [`design-rest.md`](./design-rest.md)。
 - Delivery internal DTO：dispatcher、worker、recovery 在服務內部傳遞 delivery 任務時使用的型別。
 
 ## Domain Raw Principles
@@ -133,66 +133,28 @@ External webhook payload 使用固定 envelope，`data` 內只放商戶處理事
 - Optional reason 欄位只有在產品決定對外揭露穩定 code / reason 時才加入。
 - `event_id`、`id`、`api_version`、`delivered_at` 由 webhook 系統補齊，不從 domain raw 輸入。
 
-## Management DTO Boundary
+## Management Read Model Boundary
 
-Merchant console 的 subscription management DTO 與交易 domain raw 無直接耦合。
+Merchant console 的 subscription management read model 與交易 domain raw 無直接耦合。
 
-Subscription summary / detail DTO 是 management read model，不是 `WebhookSubscription` domain object 本體。`eventTypeCount` 與 `eventTypes` 都由 subscription-event binding 與 code-defined event catalog 組裝，不應反推為 subscription 本體欄位。
+Subscription summary / detail 是 management read model，不是 `WebhookSubscription` domain object 本體。`eventTypeCount` 與 `eventTypes` 都由 subscription-event binding 與 code-defined event catalog 組裝，不應反推為 subscription 本體欄位。
 
-`id` 欄位以 `string` 表示，對應平台 short id string representation；後端 persistence id 仍為 bigint。時間欄位以 `IsoDateTimeUtc` 表示，值為 UTC ISO 8601 字串。具體 TypeScript class、validation decorator 與序列化設定留給 plan 依 codebase pattern 決定。
+Subscription `id` 與 path parameter `subscriptionId` 使用平台 short id string representation；persistence id 的實際 primitive、codec 使用與 class 命名由 plan 依 codebase pattern 決定。時間欄位需以穩定、可序列化且具 UTC 語意的格式對外呈現。
 
-```typescript
-type IsoDateTimeUtc = string;
+Management read model conceptual fields：
 
-interface WebhookEventTypeOptionDto {
-  eventKey: string;
-  displayName: string;
-  sortOrder: number;
-}
+| Model | Fields |
+| --- | --- |
+| Event type option | `eventKey`, `displayName`, `sortOrder` |
+| Event type list | event type option collection |
+| Subscription summary | `id`, `endpointUrl`, `eventTypeCount`, `createdAt`, `updatedAt` |
+| Subscription detail | `id`, `endpointUrl`, `eventTypes`, `createdAt`, `updatedAt` |
+| Subscription list | subscription summary collection with paging metadata; concrete envelope follows codebase plan |
+| Create subscription input | `endpointUrl`, `eventKeys` |
+| Update subscription input | `endpointUrl`, `eventKeys` |
+| Delete subscription result | deleted success marker |
 
-interface WebhookEventTypeListResponseDto {
-  items: WebhookEventTypeOptionDto[];
-}
-
-interface WebhookSubscriptionSummaryDto {
-  id: string;
-  endpointUrl: string;
-  eventTypeCount: number;
-  createdAt: IsoDateTimeUtc;
-  updatedAt: IsoDateTimeUtc;
-}
-
-interface WebhookSubscriptionDetailDto {
-  id: string;
-  endpointUrl: string;
-  eventTypes: WebhookEventTypeOptionDto[];
-  createdAt: IsoDateTimeUtc;
-  updatedAt: IsoDateTimeUtc;
-}
-
-interface WebhookSubscriptionListResponseDto {
-  items: WebhookSubscriptionSummaryDto[];
-  page: number;
-  pageSize: number;
-  total: number;
-}
-
-interface CreateWebhookSubscriptionRequestDto {
-  endpointUrl: string;
-  eventKeys: string[];
-}
-
-interface UpdateWebhookSubscriptionRequestDto {
-  endpointUrl: string;
-  eventKeys: string[];
-}
-
-interface DeleteWebhookSubscriptionResponseDto {
-  deleted: true;
-}
-```
-
-REST/RPC management contract 中的 subscription `id` 與 path parameter `subscriptionId` 使用平台 short id string representation；DB persistence id 仍為 bigint。`CreateWebhookSubscriptionRequestDto` 與 `UpdateWebhookSubscriptionRequestDto` 欄位集合相同；plan 可根據 codebase 慣例決定使用同一個 class 或分開定義。
+Create and update inputs have the same conceptual field set. Plan may implement them with one shared class or separate classes according to codebase convention.
 
 UI 顯示文字第一版使用 catalog 提供的 `displayName`；`eventKey` 仍是 request validation、subscription binding 與 dispatcher matching 的穩定識別。`sortOrder` 只供前端排序，不代表事件優先權或處理順序。
 
@@ -200,12 +162,12 @@ UI 顯示文字第一版使用 catalog 提供的 `displayName`；`eventKey` 仍�
 
 第一版 signing secret 不屬於 subscription-level type contract。Webhook delivery 使用環境變數提供的統一預設 signing secret。
 
-因此 Stage 1 subscription DTO、domain raw 與 management API 不包含 secret 欄位。Signing header、signature algorithm 與驗簽文件留給 Stage 4 設計或 plan 補齊。
+因此 Stage 1 subscription management read model、domain raw 與 management API 不包含 secret 欄位。Signing header、signature algorithm 與驗簽文件留給 Stage 4 設計或 plan 補齊。
 
 ## Open Points
 
-- External event contract 是否需要與 external API DTO 共用命名與 primitive type。
-- Management DTO 是否只服務 merchant console，或也會被 external API 文件引用。
+- External event contract 是否需要與 external API contract 共用命名與 primitive type。
+- Management read model 是否只服務 merchant console，或也會被 external API 文件引用。
 - Delivery internal DTO 是否需要獨立於 persistence entity 定義。
 - Failure / blocked / cancelled reason 是否納入第一版 external payload。
 - `occurred_at` 應使用交易狀態變更時間、交易 `updatedAt`，或 outbox event 建立時間。
