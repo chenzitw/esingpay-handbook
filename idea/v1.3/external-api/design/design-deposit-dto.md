@@ -8,6 +8,18 @@
 - 結構比 internal DTO 簡化，但保留對帳與交易追蹤需要的細節。
 - 不直接暴露 internal `DepositDto`、`CorrelatedNetworkdepositTransactionDto`、endpoint lifecycle、actor、status history。
 
+## List Query Params
+
+`GET /external/v1/deposits` 第一版查詢參數：
+
+| Key | Type | 代表意義 |
+| --- | --- | --- |
+| `page` | `number` | Offset paging page。 |
+| `size` | `number` | Offset paging size。 |
+| `statusIn` | `ExternalDepositStatus[]` | 以對外 Deposit 狀態過濾。 |
+
+本版先不提供 wallet id filter。若後續新增 wallet filter，應明確定義它對應 `ExternalDepositDto.wallet.id`，而不是 internal wallet numeric id。
+
 ## ExternalDepositDto
 
 | Key | Type | 代表意義 |
@@ -16,7 +28,7 @@
 | `wallet` | `WalletDto` | 入金接收 wallet 的 external 摘要。 |
 | `transaction` | `DepositTransactionDto` | 本筆 deposit 使用的 payment / network / transaction 摘要。 |
 | `source` | `ExternalDepositSourceDto` | 入金來源。這是外部付款方，只保留觀測到的基本資訊。 |
-| `status` | `DepositStatus` | 對外 Deposit 狀態。 |
+| `status` | `ExternalDepositStatus` | 對外 Deposit 狀態。 |
 | `currencyCode` | `CurrencyCode` | 出金資產幣別，例如 `USDT`、`TRX`。 |  |
 | `amount` | `NumericString` | 入金原始金額。 |
 | `amountFee` | `NumericString` | 此筆入金收取的手續費。 |
@@ -39,7 +51,7 @@
 | `type` | `'blockchain' \| 'bank'` | Payment rail 類型。 |
 | `provider` | `string` | Network provider，例如 `tron`、`solana`、`swift`、`stripe`。 |
 | `blockchain` | `TransactionBlockchainDetailDto \| null` | Blockchain-specific transaction detail。 |
-| `bank` | `TransactionBankDetailDto \| null` | Bank-specific transfer detail。 |
+| `bank` | `null` | 第一版不提供 bank-specific transfer detail；bank detail 之後另開文件補規格。 |
 | `legs` | `ExternalLegsDto[]` | 此交易實際造成的資產流動明細，例如 principal、network fee。 |
 
 
@@ -52,15 +64,11 @@
 | `fromAddress` | `string` | 鏈上來源地址。 |
 | `toAddress` | `string` | 鏈上目的地址。 |
 
-### TransactionBankDetailDto (future)
+### Bank Detail
 
-| Key | Type | 代表意義 |
-| --- | --- | --- |
-| `network` | `string` | Bank transfer rail，例如 `swift`、`ach`、`sepa`。 |
-| `providerReferenceId` | `string \| null` | Provider reference id。 |
-| `bankReferenceId` | `string \| null` | Bank-side reference id。 |
-| `senderBankCode` | `string \| null` | Sender bank code。 |
-| `recipientBankCode` | `string \| null` | Recipient bank code。 |
+第一版 `DepositTransactionDto.bank` 固定為 `null`，不定義 `TransactionBankDetailDto`。
+
+後續若要支援 bank rail detail，另開設計文件定義欄位；在此之前 implementation doc 可省略 bank detail DTO。
 
 ### ExternalLegsDto
 
@@ -80,7 +88,7 @@
 | `rail` | `string` | 金流來源管道，例如 `tron`、`solana`。 |
 | `identifier` | `string` | 來源識別值，例如鏈上 from address、bank account。 |
 
-## DepositStatus
+## ExternalDepositStatus
 
 | Value | 代表意義 |
 | --- | --- |
