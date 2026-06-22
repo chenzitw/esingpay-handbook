@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -8,93 +8,103 @@ updated_by: Codex
 
 ## Goal
 
-Stage 3 完成 dispatcher 與 delivery creation。Dispatcher 從 pending outbox event 找出 matching subscriptions，建立 webhook delivery，並發布 delivery execution job。
+Stage 3 完成 pending delivery job publishing 與 publish recovery。Stage 2 已建立的 deliveries 可被投入 Webhook service-private execution queue，且暫時 publish failure 不會讓 delivery 永久遺失。
 
 ## Scope
 
 In scope：
 
-- Pending outbox event polling / dispatch trigger。
-- Eligible subscription matching。
-- No-subscriber dispatch handling。
-- Delivery creation。
-- Delivery job publishing。
-- Outbox event dispatch status transition。
+- Pending delivery lookup and claim direction。
+- `webhook.delivery.execute` private job publishing。
+- Delivery job deduplication direction。
+- Queue publish failure recovery。
+- Publisher scheduling / triggering direction。
 
 Out of scope：
 
-- 實際 HTTP POST endpoint。
-- Signing secret 使用。
-- Delivery timeout recovery。
-- Retry/backoff policy。
+- Inbound domain event consumption。
+- Subscription matching and delivery creation。
+- Fund publisher implementation。
+- HTTP POST、signing、execution timeout recovery。
+- Retry/backoff product policy。
 
 ## Inputs
 
-- Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
-- Management transport / capability boundary：[`../design/design-rpc.md`](../design/design-rpc.md)。
+- Persistence model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
 - Queue topology：[`../design/design-queue-topology.md`](../design/design-queue-topology.md)。
+- Service boundary：[`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
+- Stage 2 pending delivery persistence and snapshot semantics。
 
-## Dispatch Flow
+## Publishing Flow
 
 ```text
-dispatcher
-  -> fetch pending webhook_outbox_event batch
-  -> query active, non-deleted subscription by merchant_id + event_type
-  -> if none:
-       mark outbox event DISPATCHED
-     else:
-       create webhook_delivery per subscription
-       publish webhook.delivery.execute job per delivery
-       mark outbox event DISPATCHED
+delivery publisher
+  -> find eligible PENDING deliveries
+  -> claim or identify publishable batch
+  -> publish webhook.delivery.execute with delivery id
+  -> record publication outcome if required by the selected recovery model
+
+later publisher cycle
+  -> find deliveries whose jobs were not published successfully
+  -> publish again
 ```
 
 ## Critical Decisions
 
-- Dispatcher 查詢 subscription 時必須排除已軟刪除資料，並確認 subscription 已訂閱 outbox event 的 `event_type`。
-- Matching 必須透過 `webhook_subscription_event_type` relation，不可只用 merchant scope。
-- Delivery 需保存 endpoint 與 payload snapshot。
-- Queue publish failure 的補償方式需在 plan 明確處理。
-- Outbox event status 只保留 `PENDING` / `DISPATCHED`；沒有訂閱者時同樣標記 `DISPATCHED`，不使用獨立 no-subscriber outbox status。
+- Delivery execution queue 是 Webhook service-private job mechanism，不是 Fund / Webhook 跨 domain event contract。
+- Job payload 只需穩定 delivery identifier；worker 從 persistence 讀取 endpoint 與 payload snapshot。
+- Queue publish 與 DB state 無法視為單一 transaction；publish failure 必須可由後續 publisher cycle 補償。
+- Duplicate execution jobs are allowed only when Stage 4 worker state locking makes them safe。
+- Publisher 不重新 matching subscriptions，也不修改 delivery payload / endpoint snapshot。
+- Stage 3 owns unpublished / publish-failed pending delivery recovery；Stage 4 owns execution and stuck execution recovery。
+- Publication claim、queued marker 或 deterministic job id 的實際組合由 plan 依現有 BullMQ pattern與 concurrency requirements 定案。
 
-## Validation Target
+## Plan Inventory
+
+- Delivery publication query：找出可發布或需補發的 pending deliveries。
+- Private queue dispatcher：發布 delivery execution job。
+- Publisher trigger：以 scheduler、bootstrap backfill 或等效既有 pattern 觸發 publication cycles。
+- Targeted verification：驗證 successful publish、publish failure recovery、duplicate job safety boundary。
+
+## Validation Direction
 
 Stage 3 完成時應能證明：
 
 ```text
-pending outbox event
-  -> no matching subscription
-  -> no delivery rows created
-  -> outbox event DISPATCHED
+PENDING delivery
+  -> publisher emits webhook.delivery.execute
+  -> job contains delivery identifier
 ```
 
 以及：
 
 ```text
-pending outbox event
-  -> matching subscriptions
-  -> webhook_delivery rows created
-  -> delivery execution jobs published
-  -> outbox event DISPATCHED
+queue publish failure
+  -> delivery remains recoverable
+  -> later publisher cycle can publish the job
 ```
 
 驗證重點：
 
-- 多 subscription 訂閱同一 event 時建立多筆 delivery。
-- 已刪除或未訂閱目標事件的 subscription 不建立 delivery。
-- Dispatcher 可重跑而不造成重複 delivery，或 plan 明確定義去重策略。
+- Publisher 不建立第二筆 delivery。
+- Publisher 不重新查 subscription 或來源交易資料。
+- 多個 publisher cycle 不會造成不可控的 concurrent execution。
 
 ## Estimate
 
 | Item | 估時 |
 | --- | ---: |
-| Dispatcher polling / scheduling | 1 天 |
-| Subscription matching and delivery creation | 1.5 天 |
-| Queue publishing and dispatch status handling | 1.5 天 |
+| Pending delivery publication capability | 1 天 |
+| Publish recovery and targeted verification | 1 天 |
 
-總估時：4 天。
+總估時：2 天。
+
+## Pattern Gaps
+
+- Fund BullMQ dispatcher / worker 與 scheduler / bootstrap backfill 可作為方向性 baseline，但 delivery publication 的 DB-to-queue recovery 仍是新組合，plan 必須明確決定 publication state 與 concurrent publisher claim strategy。
 
 ## Open Points
 
-- Outbox event 轉為 `DISPATCHED` 的精確時機。
-- Delivery 去重策略。
-- Dispatcher batch size 與 lock strategy。
+- 是否需要獨立 queued/published marker，或以 deterministic job id + pending query 支援補償。
+- Publisher batch size、cadence 與 concurrency claim strategy。
+- Delivery identifier 在 private job payload 中的 primitive representation。

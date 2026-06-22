@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-15
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -15,7 +15,7 @@ Webhook 讓商戶可以在後台登記 callback endpoint，接收系統主動推
 - 商戶後台對 webhook endpoint 的觀看、登記、修改與刪除。
 - 系統內部把交易事件轉換為對外 webhook delivery 的派送流程。
 
-Webhook 派送不應綁在交易主流程內同步呼叫商戶 endpoint。交易服務只負責向 domain event notification queue 發布交易狀態變更事件，後續由 webhook inbound event consumer、dispatcher、delivery worker 與 recovery scheduler 非同步處理。
+Webhook 派送不應綁在交易主流程內同步呼叫商戶 endpoint。Fund service 只負責向 domain event notification queue 發布交易狀態變更事件；Webhook inbound event consumer 驗證事件、matching subscriptions 並直接建立 deliveries，後續由 delivery publisher、worker 與 recovery scheduler 非同步處理。
 
 ## Scope
 
@@ -23,8 +23,8 @@ In scope：
 
 - 商戶可管理自己名下的 webhook subscription。
 - 商戶可為每個 webhook endpoint 選擇要接收的事件類型。
-- 系統可根據交易 domain event notification 建立 webhook outbox event。
-- 系統可根據 outbox event 與 subscription 建立 delivery 任務。
+- 系統可根據 Fund domain event notification 與 subscription 直接建立 delivery 任務。
+- Delivery 可保存事件來源、event type 與來源業務資源，並防止相同來源事件對同一 subscription 重複建立。
 - 系統可追蹤每個 endpoint 的派送結果。
 - 系統可補償 pending 或 timeout 的 delivery 任務。
 
@@ -35,26 +35,41 @@ Out of scope：
 - 商戶手動重送 delivery 的後台功能。
 - webhook endpoint 驗證流程。
 - webhook event type 的 UI CRUD。
+- Webhook inbound event outbox / inbox persistence、event replay 與 no-subscriber audit。
+- Fund service producer outbox、relay 與穩定 event id。
 
 ## Design Map
 
-- [`design-domain-model.md`](./design-domain-model.md)：webhook subscription、event type、outbox event、delivery 的概念模型與 persistence principles。
+- [`design-domain-model.md`](./design-domain-model.md)：webhook subscription、event type、delivery 與 inbound event traceability 的概念模型。
 - [`design-persistence-model.md`](./design-persistence-model.md)：webhook 第一版 persistence backing、關聯與查詢支援需求的 conceptual schema shape；具體 DB 型別、index 與 migration 由 plan 定案。
 - [`design-service-boundary.md`](./design-service-boundary.md)：webhook capability ownership、service boundary、anti-patterns。
 - [`design-management-surface.md`](./design-management-surface.md)：商戶後台第一版 webhook subscription 管理能力與 frontend handoff。
 - [`design-rest.md`](./design-rest.md)：merchant / platform management surface 的 REST contract 語意；codebase envelope、DTO class 與 validator 細節由 plan 定案。
 - [`design-rpc.md`](./design-rpc.md)：api-gateway REST RPC proxy 與 webhook service internal capability 的 management transport boundary。
 - [`design-error-contract.md`](./design-error-contract.md)：subscription management 的錯誤語意、穩定 error code 與 REST/RPC mapping 邊界。
-- [`design-dispatch-flow.md`](./design-dispatch-flow.md)：交易事件轉 outbox、dispatcher 建立 delivery、worker 派送與 recovery 的流程約束。
+- [`design-dispatch-flow.md`](./design-dispatch-flow.md)：inbound event 直接建立 delivery、publisher、worker 與 recovery 的流程約束。
 - [`design-queue-topology.md`](./design-queue-topology.md)：domain event notification queue 與 webhook delivery execution queue 的 topic / payload 討論基礎。
 - [`design-type-contract.md`](./design-type-contract.md)：domain raw、event contract、management read model 與 internal DTO boundary 的設計入口；具體 TypeScript 型別由 plan 定案。
 - [`design-payload-contract.md`](./design-payload-contract.md)：POST 到商戶 endpoint 的 webhook payload envelope 與 event-specific data shape。
+
+## Deferred Reliability Target
+
+第一版因 Fund event 尚無穩定 event id，Webhook 採 direct-to-delivery，不保存 inbound event。Inbox persistence 仍是已確認的 target architecture：producer 提供穩定 `event_id` 後，Webhook 應新增 `webhook_inbox_event`，以 `source + event_id` 去重，並將 queue consumption 與 delivery creation 拆成可恢復的兩個階段。
+
+Deferred inbox 應補足：
+
+- no-subscriber receipt。
+- inbound event audit 與 replay。
+- DB commit 後 queue complete 的穩定去重。
+- `inbox_event_id + subscription_id` delivery uniqueness。
+
+目標 domain 與 persistence shape 分別見 [`design-domain-model.md`](./design-domain-model.md) 與 [`design-persistence-model.md`](./design-persistence-model.md)；target queue flow 見 [`design-queue-topology.md`](./design-queue-topology.md)。
 
 ## Open Points
 
 - Webhook payload 的 external contract。
 - Delivery 失敗後的重試策略。
-- Outbox event 何時標記為完成處理。
 - Fund / transaction domain event notification topic 的實際拆分與命名。
+- Producer 穩定 `event_id` 的 contract 與 deferred inbox migration timing。
 - 是否需要提供商戶查詢 delivery history。
 - 是否需要提供管理端人工重送 delivery。

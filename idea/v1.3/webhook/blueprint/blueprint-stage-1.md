@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-15
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -8,7 +8,7 @@ updated_by: Codex
 
 ## Goal
 
-Stage 1 建立 webhook subscription management 與 code-defined webhook event type catalog 的第一版 backend 基礎。完成後，merchant / platform management surface 可透過 api-gateway 管理 merchant webhook subscriptions，後續 Stage 2-4 可依同一份 event catalog 與 subscription relation 產生 outbox event、match subscription 並建立 delivery。
+Stage 1 建立 webhook subscription management 與 code-defined webhook event type catalog 的第一版 backend 基礎。完成後，merchant / platform management surface 可透過 api-gateway 管理 merchant webhook subscriptions，後續 Stage 2-4 可依同一份 event catalog 與 subscription relation 消費 inbound event、match subscription 並建立 delivery。
 
 本 blueprint 只定義 Stage 1 的 phase 拆分、跨 phase 決策、依賴與驗收方向。所有 codebase-specific landing details 由 codebase plan set 負責。
 
@@ -45,8 +45,8 @@ In scope：
 
 Out of scope：
 
-- Outbox event production.
-- Dispatcher / delivery worker / recovery scheduler.
+- Inbound event consumption and delivery creation.
+- Delivery publisher / delivery worker / recovery scheduler.
 - Delivery history and manual resend.
 - Signature generation / verification docs.
 - Endpoint ownership verification.
@@ -55,11 +55,11 @@ Out of scope：
 
 ## Stage Decisions
 
-- Event type catalog is code-defined and shared by event type read, subscription validation and later dispatcher matching.
+- Event type catalog is code-defined and shared by event type read, subscription validation and later inbound consumer matching.
 - `deposit.blocked` is part of the first supported catalog.
 - Subscription can exist with zero event bindings; empty `eventKeys` means keep the endpoint but subscribe to no events.
 - Duplicate endpoint URL is allowed for the same merchant in Stage 1.
-- Subscription delete is soft delete. Deleted subscriptions do not appear in management reads and do not participate in later dispatcher matching.
+- Subscription delete is soft delete. Deleted subscriptions do not appear in management reads and do not participate in later inbound consumer matching.
 - Subscription management read models compose `eventTypeCount` and `eventTypes` from binding + catalog; these are not subscription entity fields.
 - Gateway owns account authentication and account-surface permission enforcement. Webhook management capability trusts the gateway-provided identity and target merchant scope.
 - Merchant surface operations are scoped to the authenticated merchant.
@@ -87,7 +87,7 @@ Plan-owned details：concrete codebase landing and convention instantiation.
 
 ### Phase 2: Persistence Foundation And Event Catalog
 
-Purpose：establish the Stage 1 persistence backing and catalog source needed by read/write APIs and later dispatcher matching.
+Purpose：establish the Stage 1 persistence backing and catalog source needed by read/write APIs and later inbound consumer matching.
 
 Blueprint-level outputs：
 
@@ -139,7 +139,7 @@ Plan-owned details：concrete write-side implementation, transaction mechanism a
 
 ### Phase 6: Backend Verification
 
-Purpose：verify Stage 1 backend behavior before it becomes the foundation for outbox, dispatcher and delivery stages.
+Purpose：verify Stage 1 backend behavior before it becomes the foundation for inbound consumption、delivery creation and execution stages.
 
 Blueprint-level outputs：
 

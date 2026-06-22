@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -26,7 +26,6 @@ updated_by: Codex
 ```json
 {
   "id": "webhook_delivery_id",
-  "event_id": "webhook_outbox_event_id",
   "event_key": "withdrawal.completed",
   "occurred_at": "2026-06-09T12:34:56.000Z",
   "delivered_at": "2026-06-09T12:35:01.000Z",
@@ -41,9 +40,8 @@ updated_by: Codex
 | Field | Meaning |
 | --- | --- |
 | `id` | 本次 delivery 的識別值。商戶可用於 log correlation。 |
-| `event_id` | 觸發本次 delivery 的 outbox event 識別值。 |
 | `event_key` | 穩定事件 key，例如 `withdrawal.completed`。 |
-| `occurred_at` | 系統內部事件發生或 outbox event 建立時間。 |
+| `occurred_at` | 上游交易事件發生時間。 |
 | `delivered_at` | worker 發送本次 HTTP request 的時間。 |
 | `merchant_id` | 事件所屬 merchant。 |
 | `api_version` | webhook payload contract version。 |
@@ -75,7 +73,6 @@ Conceptual payload：
 ```json
 {
   "id": "webhook_delivery_id",
-  "event_id": "webhook_outbox_event_id",
   "event_key": "withdrawal.completed",
   "occurred_at": "2026-06-09T12:34:56.000Z",
   "delivered_at": "2026-06-09T12:35:01.000Z",
@@ -115,7 +112,6 @@ Conceptual payload：
 ```json
 {
   "id": "webhook_delivery_id",
-  "event_id": "webhook_outbox_event_id",
   "event_key": "deposit.completed",
   "occurred_at": "2026-06-09T12:34:56.000Z",
   "delivered_at": "2026-06-09T12:35:01.000Z",
@@ -152,8 +148,8 @@ Notes：
 
 ## Snapshot Rules
 
-- Outbox event 保存 event payload snapshot，表示事件發生時的內容。
-- Delivery 保存實際送出的 payload snapshot，避免 outbox payload 或 subscription 後續變更影響歷史紀錄。
+- Inbound event consumer 在建立 delivery 時保存實際送出的 payload snapshot，表示事件消費當下的內容。
+- Delivery payload snapshot 不受 subscription 或來源交易後續變更影響。
 - Worker 發送與簽章時使用 delivery payload snapshot。
 
 ## Signing Relationship
@@ -163,12 +159,12 @@ Notes：
 Plan 需避免以下情況：
 
 - 簽章時使用一份 payload，實際 POST 時又重新序列化成不同內容。
-- Worker 發送前重新查交易現況組 payload，造成 delivery payload 與 outbox event 發生時間不一致。
+- Worker 發送前重新查交易現況組 payload，造成 delivery payload 與 inbound event 發生時間不一致。
 
 ## Stage Relationship
 
-- Stage 2：建立 outbox payload builder，產生符合本 envelope 的 event payload snapshot。
-- Stage 3：delivery creation 將 outbox payload 複製成 delivery payload snapshot。
+- Stage 2：inbound consumer 使用 payload builder 產生符合本 envelope 的 payload，並直接保存為 delivery snapshot。
+- Stage 3：delivery publisher 發布既有 pending delivery，不重建 payload。
 - Stage 4：worker 使用 delivery payload snapshot 簽章並 POST。
 
 ## Open Points

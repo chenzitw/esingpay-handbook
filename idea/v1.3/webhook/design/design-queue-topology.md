@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -14,14 +14,14 @@ updated_by: Codex
 
 ## Context
 
-交易狀態變更不是由 fund / withdrawal / deposit 服務同步呼叫 webhook service。其他服務在處理交易狀態變更時，會向 queue 發出一筆 domain event notification。Webhook service 訂閱該 queue，收到事件後建立 `webhook_outbox_event`。
+交易狀態變更不是由 Fund service 同步呼叫 webhook service。Fund service 在處理交易狀態變更時向 queue 發出 domain event notification；Webhook service 訂閱該 queue，收到事件後直接 matching subscriptions 並建立 `webhook_delivery`。
 
-Webhook 後續仍有自己的派送 queue：dispatcher 將 outbox event match subscription 後建立 `webhook_delivery`，再把 delivery job 放入 queue，等待 delivery worker 執行 HTTP POST 並更新 delivery status。
+Webhook 第一版不保存 inbound event 的 outbox 或 inbox record。Delivery publisher 將 pending delivery job 放入 queue，等待 delivery worker 執行 HTTP POST 並更新 delivery status。
 
 因此第一版至少有兩段 queue：
 
-- Domain event notification queue：fund 或其他交易服務發布交易事件狀態變更，webhook service 消費並建立 outbox event。
-- Webhook delivery execution queue：webhook dispatcher 發布 delivery job，webhook worker 消費並執行 endpoint POST。
+- Domain event notification queue：Fund service 發布交易事件狀態變更，webhook service 消費並直接建立 matching deliveries。
+- Webhook delivery execution queue：webhook delivery publisher 發布 delivery job，webhook worker 消費並執行 endpoint POST。
 
 Queue provider 第一版暫定採 Azure Service Bus。正式 queue/topic 名稱、consumer 設定、dead letter、retry/backoff、資源命名與部署設定留給 plan 依 infra convention 定案。
 
@@ -53,19 +53,19 @@ Topic 命名先採以下概念格式：
 
 | Queue stage | Conceptual topic | Producer | Consumer | Purpose |
 | --- | --- | --- | --- | --- |
-| Domain event notification | `fund.deposit.status-changed` 或同級命名 | Fund / transaction domain service | Webhook inbound event consumer | 通知 webhook 某筆交易狀態已變更，可建立 outbox event。 |
-| Domain event notification | `fund.withdrawal.status-changed` 或同級命名 | Fund / transaction domain service | Webhook inbound event consumer | 通知 webhook 某筆 withdrawal 狀態已變更，可建立 outbox event。 |
-| Outbox dispatch trigger | `webhook.outbox.dispatch` 或 polling scheduler | Scheduler / dispatcher trigger | Webhook dispatcher | 觸發 pending outbox event dispatch；若採 polling scheduler 可不建此 topic。 |
-| Delivery execution | `webhook.delivery.execute` | Webhook dispatcher / recovery scheduler | Webhook delivery worker | 要求 worker 執行某一筆 delivery。 |
+| Domain event notification | `fund.deposit.status-changed` 或同級命名 | Fund service | Webhook inbound event consumer | 通知 webhook 某筆 deposit 狀態已變更，可 matching subscriptions 並建立 deliveries。 |
+| Domain event notification | `fund.withdrawal.status-changed` 或同級命名 | Fund service | Webhook inbound event consumer | 通知 webhook 某筆 withdrawal 狀態已變更，可 matching subscriptions 並建立 deliveries。 |
+| Delivery execution | `webhook.delivery.execute` | Webhook delivery publisher / recovery scheduler | Webhook delivery worker | 要求 worker 執行某一筆 delivery。 |
 
 ## Domain Event Notification Payload
 
-Domain event notification payload 是 webhook outbox event 的上游 input。它應提供 webhook 判斷事件類型、來源資源與 payload builder 所需的最小資料。
+Domain event notification payload 是 webhook delivery creation 的上游 input。它應提供 webhook 判斷來源、事件類型、業務資源與 payload builder 所需的最小資料。
 
 Conceptual envelope：
 
 ```json
 {
+  "source": "fund",
   "eventKey": "deposit.completed",
   "resourceType": "deposit",
   "resourceIdentifier": "67890",
@@ -79,6 +79,7 @@ Conceptual envelope：
 
 | Field | Meaning |
 | --- | --- |
+| `source` | 事件來源服務或 bounded context；第一版固定為 `fund`。 |
 | `eventKey` | Webhook code-defined event catalog 內的穩定 event key，例如 `deposit.completed`。 |
 | `resourceType` | 來源資源類型，例如 `deposit` 或 `withdrawal`。 |
 | `resourceIdentifier` | 來源資源識別值。 |
@@ -89,9 +90,13 @@ Conceptual envelope：
 Domain event notification rules：
 
 - Webhook consumer 只接受 code-defined event catalog 內的 `eventKey`。
-- `resourceType` / `resourceIdentifier` 會寫入 `webhook_outbox_event`。
-- Webhook consumer 建立 outbox event 後，不同步呼叫商戶 endpoint。
+- `source`、`eventKey`、`resourceType` 與 `resourceIdentifier` 會寫入每一筆 matching `webhook_delivery`。
+- Consumer matching subscriptions 與建立 deliveries 應在同一 DB transaction 內完成；commit 後才 complete inbound queue message。
+- 重送時以 `source + eventKey + resourceType + resourceIdentifier + subscription` 防止重複 delivery。
+- 沒有 matching subscription 時不建立 persistence record，consumer 可直接 complete message。
+- Webhook consumer 建立 delivery 後，不同步呼叫商戶 endpoint。
 - Producer 不應送出 webhook delivery id、signature、retry metadata 或商戶 endpoint 資訊。
+- 第一版不要求 producer 提供穩定 `eventId`；因此同一資源的同一 event key 不支援合法重複發生。
 
 ## Webhook Delivery Execution Payload
 
@@ -112,24 +117,56 @@ Rules：
 - Worker 必須透過 delivery 狀態轉換鎖定任務，避免同一 delivery 被多個 worker 重複處理。
 - Recovery scheduler 可重新發布同一 `deliveryId`，由 worker lock 機制決定是否可執行。
 
-## Dispatcher Flow
+## Inbound Event Flow
 
 ```text
-dispatcher
-  -> fetch pending webhook_outbox_event batch
-  -> for each outbox event:
-       query active, non-deleted subscriptions by merchant_id + event_type
-       if none:
-         mark outbox event DISPATCHED
-       else:
-         create webhook_delivery per subscription
-         publish webhook.delivery.execute job per delivery
-         mark outbox event DISPATCHED
+inbound event consumer
+  -> receive Fund domain event notification
+  -> validate source, event key, resource and payload
+  -> begin DB transaction
+  -> query active, non-deleted subscriptions by merchant_id + event_type
+  -> if none: commit and complete inbound message without persistence
+  -> if matches exist:
+       create PENDING webhook_delivery per subscription
+       ignore duplicate composite delivery identity safely
+       commit DB transaction
+       complete inbound message
 ```
 
-Outbox event status only tracks whether dispatcher has processed the event. If there are no subscribers, no delivery is created and the outbox event still becomes `DISPATCHED`.
+If DB persistence fails, the inbound message must not be completed and remains eligible for redelivery or DLQ handling. If DB commit succeeds but message completion fails, redelivery relies on delivery composite uniqueness.
 
-Open decision for later planning: when subscribers exist, `DISPATCHED` can be marked after delivery rows are created and jobs are published, or after delivery rows are created with recovery compensating missing queue publishes.
+## Deferred Inbox Flow
+
+當 Fund 或其他 producer 提供穩定 `eventId` 後，target flow 改為：
+
+```text
+inbound event consumer
+  -> validate source, event id, event key, resource and payload
+  -> begin DB transaction
+  -> insert webhook_inbox_event PENDING
+       UNIQUE source + event_id
+  -> duplicate: commit and complete inbound message
+  -> new event: commit and complete inbound message
+
+inbox dispatcher
+  -> fetch PENDING inbox events
+  -> match subscriptions
+  -> create deliveries per subscription
+       UNIQUE inbox_event_id + subscription_id
+  -> mark inbox event DISPATCHED
+```
+
+此 deferred flow 取代 direct-to-delivery 的複合事件去重，並補足 no-subscriber receipt、audit 與 replay。Producer outbox 是否存在不由 Webhook ownership 決定，但 producer 必須在 queue contract 提供穩定 `eventId`。
+
+## Delivery Publishing Flow
+
+```text
+delivery publisher
+  -> find PENDING deliveries eligible for publication
+  -> publish webhook.delivery.execute per delivery
+  -> record queued/published state if Stage 3 plan requires it
+  -> leave failed publications recoverable by later polling
+```
 
 ## Delivery Worker Flow
 
@@ -162,7 +199,8 @@ First-version recovery only guarantees stuck jobs can be requeued. Retry count, 
 
 - Merchant endpoint timeout or 5xx must not affect the transaction domain flow.
 - Webhook inbound consumer failure must not drop the domain event notification silently.
-- Dispatcher failure must not make pending outbox events permanently unprocessable.
+- Delivery creation must be atomic for all subscriptions matched during one consumer attempt.
+- Delivery publisher failure must not make pending deliveries permanently unprocessable.
 - Delivery worker failure must not lose the delivery record.
 - Queue publish failure compensation must be explicit in Stage 3 / Stage 4 plans.
 
@@ -172,11 +210,10 @@ First-version recovery only guarantees stuck jobs can be requeued. Retry count, 
 fund / transaction domain service
   -> publish domain event notification
   -> webhook inbound event consumer
-  -> validate eventKey
-  -> create webhook_outbox_event PENDING
-  -> dispatcher matches subscription by merchant_id + event_type
-  -> create webhook_delivery
-  -> publish webhook.delivery.execute
+  -> validate source + eventKey + resource
+  -> match subscription by merchant_id + event_type
+  -> create webhook_delivery PENDING per subscription
+  -> delivery publisher publishes webhook.delivery.execute
   -> delivery worker locks delivery
   -> POST endpoint_url
   -> update delivery status
@@ -190,4 +227,4 @@ fund / transaction domain service
 - `occurredAt` 的權威來源是交易狀態變更時間、交易 `updatedAt`，還是 producer 發送時間。
 - Delivery execution queue 是否需要額外 job metadata，例如 trace id、publishedAt、source。
 - Azure Service Bus queue/topic naming convention and consumer setting.
-- Dispatcher queue trigger vs polling scheduler.
+- Pending delivery publisher polling cadence and publish-state representation.

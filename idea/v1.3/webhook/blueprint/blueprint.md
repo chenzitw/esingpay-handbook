@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-15
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -8,205 +8,215 @@ updated_by: Codex
 
 ## Context
 
-本 blueprint 承接 [`../design/design.md`](../design/design.md)，只負責把 webhook 交易事件推播拆成可落地的 stage 序列、phase、依賴與估時。跨 stage 的 API、management transport、persistence、queue、payload、service boundary 等 contract 由 design 文件維護。
+本 blueprint 承接 [`../design/design.md`](../design/design.md)，只負責把 Webhook 交易事件推播拆成可落地的 stage 序列、plan inventory、依賴與估時。跨 stage 的 management API、persistence、inbound event、private delivery job、payload 與 service boundary contract 由 design 文件維護。
 
 主要設計來源：
 
 - [`../design/design-rest.md`](../design/design-rest.md)：merchant / platform management REST contract semantics。
 - [`../design/design-rpc.md`](../design/design-rpc.md)：webhook service management transport boundary。
-- [`../design/design-persistence-model.md`](../design/design-persistence-model.md)：conceptual persistence model and query support requirements。
-- [`../design/design-queue-topology.md`](../design/design-queue-topology.md)：queue topics、payloads、dispatcher / worker / recovery flow。
+- [`../design/design-persistence-model.md`](../design/design-persistence-model.md)：direct-to-delivery persistence 與 deferred inbox target。
+- [`../design/design-queue-topology.md`](../design/design-queue-topology.md)：inbound domain event、private delivery job、publisher / worker / recovery flow。
 - [`../design/design-payload-contract.md`](../design/design-payload-contract.md)：outbound webhook payload contract。
 - [`../design/design-service-boundary.md`](../design/design-service-boundary.md)：ownership 與 service boundary。
 
-第一版目標是同時支援：
+第一版 Webhook scope 目標：
 
 - 商戶後台管理 webhook subscription。
-- 系統將 withdrawal / deposit 交易事件轉換為 webhook outbox event。
-- 系統依 subscription 建立 webhook delivery 並追蹤派送結果。
-- 系統以非同步 worker 執行 webhook delivery，並能補償 pending 或 timeout 任務。
+- Webhook 消費既有 Fund transaction event，依 subscription 直接建立 deliveries。
+- Webhook 追蹤每個 endpoint 的 delivery 結果。
+- Webhook 以 private queue job 非同步執行 delivery，並補償 publish failure 或 stuck execution。
+
+Fund producer、交易狀態 hook 與 producer outbox 不屬於本 blueprint。
 
 ## Scope
 
 In scope：
 
-- Webhook subscription 管理 API。
-- Code-defined webhook event type catalog 與查詢來源。
-- Webhook subscription 與 event type key 的多對多關係。
-- Webhook outbox event 與 webhook delivery 的拆表模型。
-- Dispatcher / worker / recovery scheduler 的方向性流程。
-- Internal capability / management transport surface 與服務 ownership。
-- Queue topic 與 consumer topology。
-- Webhook POST payload 第一版 envelope。
-- Stage / phase 拆分與初步開發估時。
+- Webhook subscription management API。
+- Code-defined webhook event type catalog 與 subscription-event relation。
+- Webhook inbound domain event consumption boundary。
+- Direct-to-delivery persistence、source/resource traceability 與 composite idempotency。
+- Subscription matching and delivery snapshot creation。
+- Pending delivery job publishing and publish recovery。
+- Delivery worker、signing 與 stuck execution recovery。
+- Stage / plan inventory、dependency、pattern gap 與初步估時。
 
 Out of scope：
 
-- Migration SQL、ORM entity class 與 repository 檔案位置。
-- Request / response DTO 的最終型別定義。
-- Webhook payload external contract 的完整文件與所有事件欄位細節。
+- Fund event publisher、transaction status hooks、producer outbox 與 Fund code changes。
+- Webhook inbox persistence in the first version。
+- Migration SQL、ORM class、method signature 與實際檔案 placement。
 - Signature 演算法與驗簽 header 的最終規格。
-- 重試次數、backoff、人工重送與 delivery history UI。
+- 完整 retry/backoff product policy、人工重送與 delivery history UI。
 - Endpoint ownership verification flow。
+- 新 broker infrastructure 建置；若既有 transport 無法承載 inbound event，需另行決策與估算。
 
 ## Landed Facts Assumed
 
-- Merchant ID 沿用既有 UUID 字串設計，故 webhook schema 內的 `merchant_id` 保持字串語意。
-- 其他資料表自身主鍵與 FK 使用 bigint 系統主鍵策略。
-- 交易來源追蹤命名使用：`resource_type` / `resource_identifier`。
-- 資料表命名採單數。
-- Webhook event type 不是商戶可管理資料，由 TypeScript code-defined catalog 提供，不建 DB table。
-- Webhook 派送不得阻塞 withdrawal / deposit 的主交易流程。
+- Stage 1 已完成 subscription management、code-defined event catalog 與 subscription-event binding。
+- Webhook capability 已落在 `esingpay-cradle` 的獨立 `webhook` service boundary 與 DB schema。
+- Merchant ID 使用既有 UUID string semantics；Webhook persistence record id 使用既有 bigint strategy。
+- Webhook event catalog 第一版包含 withdrawal 四種與 deposit 四種事件。
+- `source`、`event_type`、`resource_type`、`resource_identifier` 是 inbound traceability 的共用詞彙；第一版 `source = fund`。
+- Codebase guide 將跨 capability asynchronous fact 視為 Event，將 delivery execution 視為 Webhook service-private Queue job。
+- Fund service 已有 BullMQ dispatcher / worker 與 scheduler / bootstrap backfill precedent，可作為 private delivery job 的方向性 baseline。
+- Codebase 目前沒有 Fund domain event definition，也未找到 Azure Service Bus adapter precedent。
 
 ## Critical Decisions
 
-跨 stage 共同決策集中於 design 文件：
-
-- API route 與 event catalog read model 見 [`../design/design-rest.md`](../design/design-rest.md)。
-- Persistence naming、identifier/time semantics、status 與 query support requirements 見 [`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
-- Internal capability 邊界與 management transport surface 見 [`../design/design-rpc.md`](../design/design-rpc.md)。
-- Domain/service/module 命名與 ownership 見 [`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
-- Queue topic、worker topology 與 recovery 方向見 [`../design/design-queue-topology.md`](../design/design-queue-topology.md)。
-- POST payload envelope 與 event-specific data shape 見 [`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
+- 採方案 A，保留 Stage 1–4 編號：Stage 2 建立 delivery、Stage 3 發布 delivery job、Stage 4 執行 delivery。
+- Stage 2 從 Webhook inbound boundary 開始；Fund producer implementation 是 external dependency，不屬於任何 Webhook stage。
+- 第一版不建立 webhook outbox / inbox；inbound consumer 直接 matching subscriptions 並建立 delivery snapshots。
+- Delivery 第一版以 `source + event_type + resource_type + resource_identifier + subscription` 防止重複建立。
+- 沒有 matching subscription 時不建立 receipt；此限制明確由 direct-to-delivery MVP 承擔。
+- Inbound domain event 與 Webhook private delivery job 是不同 contract surface，不共用 queue job vocabulary。
+- Stage 3 owns pending delivery publication and publish recovery；Stage 4 owns execution and stuck execution recovery。
+- Deferred inbox 是已確認的 reliability target，但不進入第一版 stage estimate。
 
 ## Stage Breakdown
 
 ### Stage 1：Subscription Management And Event Catalog
 
-建立 webhook subscription、code-defined event type catalog、subscription-event relation 的 backend persistence 與 management API。
+建立 subscription、event catalog、subscription-event relation 與 merchant / platform management API。
 
 詳細 blueprint：[`blueprint-stage-1.md`](./blueprint-stage-1.md)
 
-Stage 1 已拆成多個 phase：
+Status：Stage 1 implementation complete；migration must be applied before end-to-end verification。
 
-- Phase 1：Boundary and codebase convention。
-- Phase 2：Persistence foundation and event catalog。
-- Phase 3：Event type read and validation capability。
-- Phase 4：Subscription read surface and scope baseline。
-- Phase 5：Subscription write surface and consistency boundary。
-- Phase 6：Backend verification。
-- Phase 7：Handoff and design sync。
+完成能力：
 
-完成後應能支援：
+- Merchant / platform subscription CRUD。
+- Code-defined event type lookup and validation。
+- Active subscription ownership、soft delete 與 binding semantics。
 
-- 商戶建立、查詢、修改、刪除 webhook subscription。
-- 後端以 code-defined event type catalog 作為 UI checkbox 與訂閱校驗來源。
-- Frontend implementation handoff notes are available for a later frontend plan；frontend code is not part of the current backend Stage 1 plan set。
+### Stage 2：Inbound Event Consumption And Delivery Creation
 
-### Stage 2：Outbox Event Production
-
-讓 withdrawal / deposit 相關交易狀態變更寫入 webhook outbox event，不直接呼叫商戶 endpoint。
+Webhook 消費既有 Fund transaction event，matching active subscriptions，並直接建立 pending delivery snapshots。
 
 詳細 blueprint：[`blueprint-stage-2.md`](./blueprint-stage-2.md)
 
 依賴：
 
-- Code-defined event type catalog 已存在，outbox event 能保存正式 event key。
-- Payload envelope 依 [`../design/design-payload-contract.md`](../design/design-payload-contract.md) 落地；具體欄位來源由 plan 查驗 codebase 後定案。
+- Stage 1 subscription relation and event catalog 已落地。
+- 既有 transport 能將包含必要 source / event / resource / payload semantics 的 event 送達 Webhook boundary。
 
-完成後應能支援：
+完成能力：
 
-- Withdrawal / deposit 狀態變更時建立 outbox event。
-- 交易主流程只寫入事件，不同步派送 webhook。
+- Valid event 為每個 matching subscription 建立一筆 delivery。
+- Duplicate redelivery 不重複建立同一 subscription delivery。
+- No-subscriber event 按 MVP semantics 完成而不留 persistence record。
 
-### Stage 3：Dispatcher And Delivery Creation
+### Stage 3：Delivery Job Publishing
 
-Dispatcher 輪詢 pending outbox event，依 merchant 與 event 找出 subscription 並建立 webhook delivery。
+Publisher 掃描 pending deliveries，發布 Webhook private execution jobs，並補償暫時 publish failure。
 
 詳細 blueprint：[`blueprint-stage-3.md`](./blueprint-stage-3.md)
 
 依賴：
 
-- Subscription management 已落地。
-- Outbox event production 已可產生 pending event。
-- Queue / scheduler pattern 已完成 codebase survey。
+- Stage 2 已建立 pending delivery persistence and snapshots。
+- Private queue dispatcher 與 publisher trigger pattern 已由 plan 依 codebase baseline 定案。
 
-完成後應能支援：
+完成能力：
 
-- 無訂閱者時不建立 delivery，outbox event 仍轉為 `DISPATCHED` 表示 dispatcher 已處理。
-- 有訂閱者時為每個 subscription 建立 delivery。
-- Delivery job 可被發送到 worker queue。
+- Pending delivery 可被發布為 `webhook.delivery.execute` job。
+- Publish failure 後 delivery 仍可由 later publisher cycle 補發。
 
 ### Stage 4：Delivery Worker, Recovery And Signing
 
-Worker 執行 endpoint POST、更新 delivery 結果；recovery scheduler 補償 pending 或 timeout delivery。
+Worker 執行 endpoint POST、更新 delivery 結果；recovery 補償 stuck execution。
 
 詳細 blueprint：[`blueprint-stage-4.md`](./blueprint-stage-4.md)
 
 依賴：
 
-- Dispatcher 已能建立 delivery。
-- Signing secret 來源、讀取方式與 header 命名已由 Stage 4 plan/codebase survey 確認。
-- Delivery payload snapshot 已符合 [`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
-- Timeout 與 retry 第一版策略已決定。
+- Stage 3 已能發布 delivery execution job。
+- Signing secret 來源、header 與 timeout / retry 第一版策略已決定。
+- Delivery payload snapshot 符合 [`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
 
-完成後應能支援：
+完成能力：
 
-- Worker 鎖定 delivery 並執行 HTTP POST。
-- Delivery 成功 / 失敗狀態可追蹤。
-- Recovery scheduler 能補償卡住的 delivery。
+- Worker 鎖定 delivery、簽章並 POST endpoint。
+- Delivery success / failure 可追蹤。
+- Stuck execution 可被 recovery flow 重新投入 worker queue。
 
 ## End-To-End Flow
 
 ```text
-withdrawal / deposit status transition
-  -> webhook event producer
-  -> webhook_outbox_event
-  -> dispatcher polls pending outbox events
-  -> query eligible webhook_subscription by merchant_id + event_type
-  -> create webhook_delivery per matching subscription
-  -> publish delivery job
+existing Fund transaction event transport
+  -> Webhook inbound event consumer
+  -> validate source + event type + resource + payload
+  -> match active subscriptions by merchant_id + event_type
+  -> create PENDING webhook_delivery per subscription
+  -> delivery publisher emits private execution job
   -> delivery worker locks delivery
   -> sign payload
   -> POST endpoint_url
   -> update delivery status
-  -> recovery scheduler requeues stuck delivery when needed
+  -> recovery requeues stuck execution when needed
 ```
+
+## Deferred Inbox Target
+
+Producer 提供穩定 `event_id` 後，後續 blueprint 應導入 `webhook_inbox_event`：
+
+- Consumer 先保存 inbox event，再 complete inbound message。
+- Inbox 以 `source + event_id` 去重並保存 no-subscriber receipt。
+- Dispatcher 從 pending inbox event 建立 deliveries。
+- Delivery 以 `inbox_event_id + subscription_id` 去重。
+
+此 target 不改變本次 Stage 2–4 scope，也不納入本次 estimate。
 
 ## Sequencing
 
 Dependencies：
 
-- Stage 1 必須先確定 code-defined event type catalog，否則 UI checkbox 與 subscription validation 無法落地。
-- Stage 2 依賴 event type catalog，因 outbox event 需要保存正式 event key。
-- Stage 3 依賴 subscription relation 與 outbox event。
-- Stage 4 依賴 delivery 建立流程。
+- Stage 1 已完成，是 Stage 2 subscription matching 的前置條件。
+- Stage 2 必須先建立 delivery persistence 與 snapshot semantics，Stage 3 才能只處理 publication。
+- Stage 3 必須先提供 execution job，Stage 4 worker 才能完整驗證。
+- Fund producer implementation 可由外部工作流獨立進行；Webhook blueprint 不安排其 sequencing。
 
 Parallelism：
 
-- Stage 1 內部 phase 應依 [`blueprint-stage-1.md`](./blueprint-stage-1.md) 的 sequencing 推進。
-- Stage 2 可在 Stage 1 data model 穩定後與 UI 細節並行。
-- Stage 3 的 dispatcher plan 可在 queue pattern survey 完成後與 Stage 2 後段並行準備，但 implementation 應等 outbox event production 可用。
-- Stage 4 應在 delivery schema、queue topic 與狀態轉換規則穩定後展開。
+- Stage 2 plan 可先完成 delivery persistence / matching inventory，再接入已確認的 inbound adapter。
+- Stage 3 plan 可在 Stage 2 後段準備 private queue 與 scheduler pattern，但 implementation verification 依賴 Stage 2 delivery rows。
+- Stage 4 的 signing / HTTP client research 可與 Stage 3 並行，完整 worker flow 需等待 execution job 與 delivery state 穩定。
+
+Delivery cadence：
+
+- Stage 2 完成後先驗證 inbound event 到 pending delivery，不要求 HTTP delivery。
+- Stage 3 完成後驗證 pending delivery 到 private execution job。
+- Stage 4 完成後再做完整 endpoint delivery staging verification。
 
 ## Engineering Estimate
 
-估時以前述 blueprint、既有 codebase 複用程度，以及 AI agent 協作開發方式為前提。
+估時只涵蓋 Webhook scope，不包含 Fund producer 或新 broker infrastructure。
 
 | Stage | 估時 | 依據 |
 | --- | ---: | --- |
-| Stage 1 | 6 天 | 新資料模型、code-defined event catalog、event type read endpoint、subscription CRUD、subscription-event relation、商戶/platform scope 與 backend 驗證。 |
-| Stage 2 | 3 天 | 需要接 withdrawal / deposit 狀態變更點與 payload envelope；若既有 event/hook pattern 不足，估時可能增加。 |
-| Stage 3 | 4 天 | Dispatcher polling、subscription matching、delivery creation、queue publishing 與 outbox 狀態轉換需一起驗證。 |
-| Stage 4 | 5 天 | Worker lock、HTTP POST、signature secret、timeout recovery 與失敗狀態處理未知較高。 |
+| Stage 1 | 6 天（已完成） | Subscription persistence、catalog、management API、scope 與 backend verification。 |
+| Stage 2 | 4 天 | Inbound adapter、delivery persistence、matching、snapshot、composite idempotency 與 targeted verification。 |
+| Stage 3 | 2 天 | Pending delivery publisher、private queue job 與 publish recovery。 |
+| Stage 4 | 5 天 | Worker lock、HTTP POST、signing、failure mapping 與 stuck execution recovery。 |
 
 | 範圍 | 估時 | 備註 |
 | --- | ---: | --- |
-| Stage 1-2 | 9 天 | 先建立可管理 subscription 且能產生 outbox event 的基礎。 |
-| Stage 3-4 | 9 天 | 完成完整非同步派送鏈路。 |
-| 整體 calendar | 約 3.5-4 週 | 若 queue / scheduler / secret handling pattern 已存在，可壓縮；若需建立新 infra convention，需額外時間。 |
+| Remaining Stage 2–4 | 11 天 | Webhook implementation only。 |
+| Whole Stage 1–4 | 17 天 | Stage 1 已完成；不含 Fund / broker infrastructure。 |
+| Remaining calendar | 約 2.5–3 週 | 取決於 inbound transport availability 與 signing decisions。 |
 
 ## Pattern Gaps
 
-- Outbox dispatcher 與 delivery worker 若 codebase 尚無既有 pattern，plan 需先 survey queue / scheduler / worker 既有實踐。
-- Signing secret 的保存、讀取與輪替若 codebase 尚無 convention，plan 需明確列出採用方式，後續穩定後蒸餾進 guide。
-- Webhook payload 第一版 envelope 已在 [`../design/design-payload-contract.md`](../design/design-payload-contract.md) 定案；Stage 2 plan 仍需查驗 withdrawal / deposit 欄位來源。
-- Queue provider 第一版採 Azure Service Bus；queue/topic 命名若尚無 guide convention，Stage 3 plan 需明確記錄採用理由。
+- Fund domain event definition 尚不存在。Stage 2 plan 需確認 Webhook consumer-side shared contract landing；不得擴張為 Fund publisher implementation。
+- Azure Service Bus adapter precedent 未找到。若 inbound transport 必須新建 provider integration，應先形成 infrastructure decision 並額外估算。
+- DB-to-private-queue publication recovery 是既有 BullMQ dispatcher 與 scheduler precedent的新組合；Stage 3 plan 必須鎖定 claim / marker / deterministic job id strategy。
+- Signing secret handling 與 webhook signature contract 尚未定案，Stage 4 plan 前需解決。
 
 ## Open Points
 
-- Outbox event 轉為 `DISPATCHED` 的精確時機。
-- Delivery 失敗後是否立刻 `FAILED`，或需要 `RETRYING` / retry count 等額外狀態。
-- Delivery timeout 門檻與 recovery scheduler cadence。
-- Webhook signature 演算法、header 命名與驗簽文件。
-- Webhook payload 欄位來源、failure reason 與版本策略細節。
+- Webhook consumer 實際接入的既有 topic / subscription、transport envelope 與 broker completion semantics。
+- Stage 3 publication state：queued marker、deterministic job id 或其他 recovery model。
+- Delivery timeout、failure / retry status 與 recovery cadence。
+- Webhook signature algorithm、header naming 與 verification documentation。
+- Payload optional failure / blocked / cancelled reason 的實際來源。
+- Deferred inbox migration timing and stable producer `event_id` contract。

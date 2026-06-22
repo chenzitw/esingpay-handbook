@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -8,83 +8,135 @@ updated_by: Codex
 
 ## Goal
 
-Stage 2 完成 withdrawal / deposit 狀態變更到 webhook outbox event 的 production flow。交易主流程只寫入 outbox event，不直接呼叫商戶 endpoint。
+Stage 2 完成 Webhook inbound domain event consumption、subscription matching 與 delivery creation。Webhook 從既有 event transport 接收 Fund transaction event，直接建立 matching deliveries；第一版不建立 webhook outbox 或 inbox。
 
 ## Scope
 
 In scope：
 
-- `webhook_outbox_event` persistence。
-- Produce webhook event capability。
-- Withdrawal / deposit 狀態變更點接入。
+- Webhook inbound domain event consumer。
+- Consumer-side event envelope validation and mapping。
 - Event key 到 code-defined event type catalog 的解析。
-- Payload snapshot 寫入 outbox event。
+- Active subscription matching。
+- `webhook_delivery` persistence foundation。
+- Event source、resource、endpoint 與 payload snapshot。
+- Direct-to-delivery composite idempotency。
+- Inbound message completion boundary。
 
 Out of scope：
 
-- Dispatcher matching subscription。
-- Delivery creation。
-- HTTP POST 到 merchant endpoint。
-- Retry / recovery。
-- Payload external contract 的完整版本策略。
+- Fund event publisher、transaction status hooks、producer outbox 與 Fund code changes。
+- Webhook outbox / inbox persistence。
+- Delivery execution job publishing。
+- HTTP POST、signing 與 delivery retry。
+- Deferred inbox migration。
 
 ## Inputs
 
-- Data model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
-- Management transport / capability boundary：[`../design/design-rpc.md`](../design/design-rpc.md)。
+- Persistence model：[`../design/design-persistence-model.md`](../design/design-persistence-model.md)。
+- Queue / event topology：[`../design/design-queue-topology.md`](../design/design-queue-topology.md)。
 - Service boundary：[`../design/design-service-boundary.md`](../design/design-service-boundary.md)。
+- Type boundary：[`../design/design-type-contract.md`](../design/design-type-contract.md)。
 - Payload contract：[`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
+- Stage 1 landed subscription persistence、binding relation 與 code-defined event catalog。
 
-## Event Production
+## External Dependency
 
-Withdrawal / deposit 服務在交易狀態變更時建立 webhook outbox event：
+Stage 2 假設 Fund transaction domain event 已可由既有 transport 送達 Webhook。Blueprint 只鎖定 Webhook consumer 所需的 input semantics，不規劃或估算 producer implementation。
+
+Consumer 必須取得：
+
+- `source`，第一版為 `fund`。
+- `event_type`。
+- `merchant_id`。
+- `resource_type`，第一版為 `deposit` 或 `withdrawal`。
+- `resource_identifier`。
+- `occurred_at`。
+- Payload builder 所需 domain raw。
+
+實際 transport envelope、shared contract landing 與 broker wiring 由 Stage 2 codebase plan 依 event adapter convention 定案，但不得將 Fund publisher implementation 納入 Webhook plan。
+
+## Consumption Flow
 
 ```text
-withdrawal / deposit status transition
-  -> produce webhook event
-  -> validate event_key against code-defined event type catalog
-  -> persist webhook_outbox_event PENDING
+webhook inbound event consumer
+  -> validate source + event type + resource + payload
+  -> begin webhook DB transaction
+  -> query active subscriptions by merchant_id + event_type
+  -> no matches:
+       commit without persistence
+       complete inbound message
+  -> matches:
+       build endpoint and payload snapshots
+       create PENDING webhook_delivery per subscription
+       commit
+       complete inbound message
 ```
 
-交易主流程不等待 dispatcher 或 worker。
+Persistence failure must leave the inbound message eligible for broker redelivery. If persistence commits but message completion fails, redelivery relies on delivery composite uniqueness.
 
 ## Critical Decisions
 
-- Outbox event 使用 `event_type` 保存 event key 字串。
-- Outbox event 保存 `merchant_id`、`resource_type`、`resource_identifier` 與 `payload`。
-- Event production failure 是否影響交易狀態變更 commit 需在 plan 明確決定。
-- Outbox payload 必須使用 [`../design/design-payload-contract.md`](../design/design-payload-contract.md) 定義的固定 envelope，`data` 依 event type 填入 withdrawal / deposit 內容。
-- Stage 2 plan 需查驗 withdrawal / deposit 欄位來源，決定 optional 欄位是否可提供。
+- `source` 表示 producer service / bounded context，不與 `event_type` 或 `resource_type` 混用。
+- Delivery 保存 `source`、`event_type`、`resource_type`、`resource_identifier`、`merchant_id`、`occurred_at`、endpoint 與 payload snapshot。
+- Matching 必須透過 `webhook_subscription_event_type` relation，並排除 soft-deleted subscriptions。
+- 第一版以 `source + event_type + resource_type + resource_identifier + subscription` 防止重複 delivery。
+- 複合冪等假設同一 resource 的同一 event type 只發生一次。
+- 沒有 matching subscription 時不建立 receipt；redelivery 會依當下 subscription 重新 matching。
+- Payload snapshot 在 delivery creation 時完成；Stage 3 publisher 與 Stage 4 worker 不重新查交易現況組 payload。
+- Stable producer `event_id` 與 deferred inbox 都不屬於本 stage。
 
-## Validation Target
+## Plan Inventory
+
+- Inbound adapter and contract mapping：接收與驗證 domain event，映射為 Webhook application input。
+- Delivery persistence and repository capability：建立 delivery backing、來源／資源追蹤與複合唯一性。
+- Event handling use case：在同一 consistency boundary 內 matching subscriptions、建立 delivery snapshots。
+- Targeted verification：驗證 matching、no-subscriber、duplicate redelivery、rollback 與 snapshot semantics。
+
+## Validation Direction
 
 Stage 2 完成時應能證明：
 
 ```text
-withdrawal / deposit status transition
-  -> webhook_outbox_event created with PENDING status
-  -> event_type stores a code-defined event key
-  -> payload snapshot is persisted
+valid inbound event + matching subscriptions
+  -> one PENDING delivery per subscription
+  -> source/resource/payload/endpoint snapshots persisted
+  -> inbound message completed after commit
 ```
 
-驗證重點：
+以及：
 
-- 交易狀態變更不直接呼叫 merchant endpoint。
-- 不支援或未啟用 event key 的處理語意明確。
-- Outbox event 可被 Stage 3 dispatcher 查詢。
+```text
+duplicate inbound event
+  -> no duplicate delivery for the same subscription
+```
+
+以及：
+
+```text
+inbound event + no matching subscription
+  -> no persistence record
+  -> inbound message completed
+```
 
 ## Estimate
 
 | Item | 估時 |
 | --- | ---: |
-| Outbox data model and service | 1 天 |
-| Withdrawal/deposit event hook integration | 1 天 |
-| Payload builder and validation | 1 天 |
+| Webhook inbound adapter and mapping | 1 天 |
+| Delivery persistence and composite idempotency | 1 天 |
+| Subscription matching and snapshot creation | 1 天 |
+| Targeted verification and broker-boundary checks | 1 天 |
 
-總估時：3 天。
+總估時：4 天。不包含 Fund producer 或新 broker infrastructure 的建置。
+
+## Pattern Gaps
+
+- Codebase 尚無 Fund domain event definition；Webhook plan 需確認 consumer-side shared contract landing，但不得擴張到 Fund publisher implementation。
+- Codebase 尚未找到 Azure Service Bus precedent；若既有 transport 無法直接承載此 consumer，broker adapter establishment 需另行估算並先取得 infrastructure decision。
 
 ## Open Points
 
-- Withdrawal / deposit payload optional 欄位的實際來源。
-- Event production 與交易 transaction 的一致性策略。
-- Withdrawal / deposit 各狀態對應哪些 webhook event keys。
+- Webhook consumer 實際接入的既有 topic / subscription 與 transport envelope。
+- Domain raw 是完整放入 event，或由已存在的 consumer contract 提供足夠 payload building data。
+- `occurred_at` 的 authoritative field。

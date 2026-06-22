@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-15
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -341,7 +341,7 @@ Operation semantics：
 - 以 `subscriptionId + identity.merchantId` 查詢未刪除 subscription。
 - 找不到、已刪除或不屬於目前 merchant 時，錯誤語意使用 not found。
 - Soft delete 同步更新 deletion marker 與 update time。
-- Soft delete 不刪除 subscription-event bindings；dispatcher 查詢必須排除 deleted subscription。
+- Soft delete 不刪除 subscription-event bindings；inbound event consumer matching 必須排除 deleted subscription。
 
 Response：
 

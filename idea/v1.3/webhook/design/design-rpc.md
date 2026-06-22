@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-15
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -14,7 +14,7 @@ Stage 1 codebase plan 採 `contract-rest + RestRpc` 作為 gateway-to-cradle man
 
 ## Capability Boundary
 
-Webhook 是交易事件推播能力的 owner。Withdrawal / deposit 服務不應直接建立 delivery 或呼叫商戶 endpoint；它們只需要向 webhook capability 表達「某交易事件已發生」。
+Webhook 是交易事件推播能力的 owner。Fund service 不應直接建立 webhook delivery 或呼叫商戶 endpoint；它只需向 domain event notification queue 發布「某交易事件已發生」。
 
 Merchant console / platform console 不直接呼叫 webhook service。後台管理 flow 由 api-gateway 暴露 REST route，再透過 REST RPC proxy 呼叫 webhook service management capability：
 
@@ -31,17 +31,18 @@ merchant console / platform console
 概念邊界：
 
 ```text
-withdrawal / deposit service
-  -> webhook event production capability
-  -> webhook_outbox_event
+fund service
+  -> domain event notification queue
+  -> webhook inbound event consumer
+  -> subscription matching
+  -> webhook_delivery
 ```
 
-Dispatcher / worker / recovery 是 webhook 服務內部能力：
+Inbound consumer / publisher / worker / recovery 是 webhook 服務內部能力：
 
 ```text
-webhook dispatcher
-  -> subscription matching
-  -> delivery creation
+webhook delivery publisher
+  -> pending delivery lookup
   -> publish delivery job
 
 webhook delivery worker
@@ -209,31 +210,35 @@ Merchant / platform route keys may map to the same webhook service management RP
 - Delete 必須使用 `subscriptionId + identity.merchantId`，不能只用 `subscriptionId` 軟刪除。
 - Platform surface 不使用登入 merchant ownership 作為限制，但仍只能刪除 active subscription。
 
-### Produce Webhook Event
+### Consume Domain Event
 
-用途：讓交易 domain 在狀態變更時產生 webhook outbox event。
+用途：讓 webhook inbound consumer 接收 Fund domain event，matching subscriptions 並直接建立 deliveries。這是 queue-triggered internal capability，不暴露為 management RPC。
 
 概念 input：
 
+- `source`
 - `merchant_id`
-- `event_key`
+- `event_type`
 - `resource_type`
 - `resource_identifier`
-- `payload`
+- `occurred_at`
+- domain raw payload
 
 概念 output：
 
-- outbox event id
-- accepted / ignored result
+- created delivery ids
+- no-subscriber / duplicate result
 
 決策：
 
-- 交易主流程只需確認 outbox event 已寫入或被明確忽略，不等待 delivery。
-- 若 event key 不存在於 code-defined catalog 或未啟用，錯誤語意由 plan 決定；但不應退化成同步派送。
+- 第一版 `source` 固定為 `fund`；event type 必須存在於 code-defined catalog。
+- Matching subscriptions 與建立 deliveries 應在同一 DB transaction 內完成，commit 後才 complete inbound queue message。
+- 沒有 matching subscription 時不建立 persistence record。
+- 重複訊息由 delivery 的來源／資源／subscription 複合唯一性安全忽略。
 
 ### Match Subscriptions For Event
 
-用途：dispatcher 依 outbox event 找出 active 且未刪除、且訂閱該 event type 的 subscriptions。
+用途：inbound event consumer 找出 active 且未刪除、且訂閱該 event type 的 subscriptions。
 
 概念 input：
 
@@ -244,15 +249,15 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 - matching subscription list
 
-這個 capability 可是 service method，不一定需要 contract-rpc。若 dispatcher 與 subscription management 未來會拆成不同服務，plan 可將它提升成 RPC。
+這個 capability 是 webhook service method，不需要 contract-rpc；Fund service 只透過 queue 發布事件。
 
 ### Create Delivery
 
-用途：為 outbox event 與 subscription 建立 delivery。
+用途：為 inbound domain event 與 subscription 建立 delivery。
 
 概念 input：
 
-- outbox event reference
+- source、event type 與 resource reference
 - subscription reference
 - endpoint snapshot
 - payload snapshot
@@ -294,19 +299,16 @@ Merchant / platform route keys may map to the same webhook service management RP
 - 商戶 / 平台後台 REST routes 屬 api-gateway management surface。
 - REST RPC route keys 屬 api-gateway REST RPC proxy contract；merchant route keys 使用 `rest.webhook.merch-*`，platform route keys 使用 `rest.webhook.plat-*`。
 - Subscription management capability 屬 webhook service，供 api-gateway REST RPC proxy 呼叫。
-- 交易服務產生 outbox event 屬 internal webhook production capability。
-- Dispatcher、worker、recovery 屬 webhook service internal orchestration。
-- 若 Stage 2+ 需要 gateway 以外的服務跨 bounded context 呼叫 webhook internal capability，應在 plan 中決定是否提升為 contract-rpc，而不是直接 import webhook module internals。
+- Fund service 發布 domain event notification；webhook inbound consumption 不使用 contract-rpc。
+- Inbound consumer、delivery publisher、worker、recovery 屬 webhook service internal orchestration。
 
 ## Stage Relationship
 
-- Stage 1 需要 subscription management capability，供 api-gateway REST RPC proxy 呼叫；不需要 producer RPC。
-- Stage 2 決定並落地 produce webhook event capability。
-- Stage 3 需要 dispatcher 使用 subscription matching 與 delivery creation capability。
+- Stage 1 需要 subscription management capability，供 api-gateway REST RPC proxy 呼叫。
+- Stage 2 落地 queue-triggered inbound event consumption、subscription matching 與 delivery creation capability。
+- Stage 3 落地 pending delivery publishing 與 publish recovery capability。
 - Stage 4 需要 delivery execution 與 recovery capability。
 
 ## Open Points
 
-- Produce webhook event 使用 true contract-rpc，或在同一 codebase 內先採 service/facade boundary。
-- Event production failure 是否影響交易狀態變更 commit。
-- Dispatcher / worker 是否需要獨立 service identity 或 job metadata。
+- Inbound event consumer / worker 是否需要獨立 service identity 或 job metadata。

@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-10
+updated_at: 2026-06-22
 updated_by: Codex
 ---
 
@@ -19,7 +19,7 @@ In scope：
 - Signing payload。
 - HTTP POST endpoint。
 - Delivery success / failure status update。
-- Pending / timeout delivery recovery scheduler。
+- Stuck execution recovery scheduler。
 
 Out of scope：
 
@@ -55,14 +55,16 @@ delivery worker
 
 ```text
 recovery scheduler
-  -> find old PENDING delivery
   -> find timeout DELIVERING delivery
-  -> publish delivery execution job
+  -> atomically reset or reclaim it as execution-eligible
+  -> reuse Stage 3 publication capability
 ```
 
 ## Critical Decisions
 
 - Worker 必須透過狀態轉換鎖定 delivery，避免多 worker 重複處理同一任務。
+- Stage 3 owns pending delivery publication and publish-failure recovery；Stage 4 不建立第二套 pending publisher。
+- Recovery 必須先以 guarded state transition 讓 timeout `DELIVERING` 再次可執行，再重用 Stage 3 publication capability；不能只對仍為 `DELIVERING` 的 row 發 job。
 - HTTP 2xx 視為 success；非 2xx、timeout 或 transport error 視為 failed。
 - 第一版若未導入 retry count，recovery 應只補償卡住任務，不做無限重試語意。
 - Signing secret 不能只存不可逆 hash，因 worker 需要用它產生簽章。
@@ -92,9 +94,10 @@ delivery job
 以及：
 
 ```text
-stuck PENDING or DELIVERING delivery
+stuck DELIVERING delivery
   -> recovery scheduler
-  -> delivery execution job requeued
+  -> guarded reset / reclaim
+  -> Stage 3 publication capability requeues execution job
 ```
 
 ## Estimate
@@ -104,7 +107,7 @@ stuck PENDING or DELIVERING delivery
 | Worker lock and execution flow | 1.5 天 |
 | HTTP POST and signing | 1.5 天 |
 | Failure mapping and status updates | 1 天 |
-| Recovery scheduler | 1 天 |
+| Stuck execution recovery scheduler | 1 天 |
 
 總估時：5 天。
 
