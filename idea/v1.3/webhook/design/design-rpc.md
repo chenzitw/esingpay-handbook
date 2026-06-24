@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -42,7 +42,7 @@ Inbound consumer / publisher / worker / recovery 是 webhook 服務內部能力�
 
 ```text
 webhook delivery publisher
-  -> pending delivery lookup
+  -> receive committed delivery ids or stale pending delivery ids
   -> publish delivery job
 
 webhook delivery worker
@@ -217,11 +217,11 @@ Merchant / platform route keys may map to the same webhook service management RP
 概念 input：
 
 - `source`
-- `merchant_id`
-- `event_type`
-- `resource_type`
-- `resource_identifier`
-- `occurred_at`
+- `merchantId`
+- `eventKey`
+- `resourceType`
+- `resourceIdentifier`
+- `occurredAt`
 - domain raw payload
 
 概念 output：
@@ -242,8 +242,8 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 概念 input：
 
-- `merchant_id`
-- `event_type`
+- `merchantId`
+- `eventKey`
 
 概念 output：
 
@@ -283,7 +283,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 ### Recover Stuck Deliveries
 
-用途：recovery scheduler 找出 pending 或 timeout 的 delivery 並重新投入 delivery queue。
+用途：recovery scheduler 找出 stale pending 或 timeout 的 delivery 並重新投入 delivery queue。
 
 概念 input：
 
@@ -306,7 +306,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 - Stage 1 需要 subscription management capability，供 api-gateway REST RPC proxy 呼叫。
 - Stage 2 落地 queue-triggered inbound event consumption、subscription matching 與 delivery creation capability。
-- Stage 3 落地 pending delivery publishing 與 publish recovery capability。
+- Stage 3 落地 post-commit delivery job publishing 與 stale pending publish recovery capability。
 - Stage 4 需要 delivery execution 與 recovery capability。
 
 ## Open Points

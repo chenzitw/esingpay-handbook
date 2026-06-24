@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -8,25 +8,26 @@ updated_by: Codex
 
 ## Goal
 
-Stage 3 完成 pending delivery job publishing 與 publish recovery。Stage 2 已建立的 deliveries 可被投入 Webhook service-private execution queue，且暫時 publish failure 不會讓 delivery 永久遺失。
+Stage 3 完成 delivery job publisher capability、inbound consumer post-commit publish integration 與 stale pending publish recovery。Stage 2 已建立的 deliveries 在 DB commit 後可立即投入 Webhook service-private execution queue；若 publish 暫時失敗，delivery 保持 `PENDING` 並由 recovery cron 補發，不讓 delivery 永久遺失。
 
 ## Scope
 
 In scope：
 
-- Pending delivery lookup and claim direction。
+- Delivery job publisher capability。
+- Post-commit delivery job publish integration in the inbound consumer flow。
 - `webhook.delivery.execute` private job publishing。
-- Delivery job deduplication direction。
-- Queue publish failure recovery。
-- Publisher scheduling / triggering direction。
+- Delivery job payload and deduplication direction。
+- Stale `PENDING` delivery publish recovery。
+- Recovery scheduling / triggering direction。
 
 Out of scope：
 
-- Inbound domain event consumption。
-- Subscription matching and delivery creation。
 - Fund publisher implementation。
+- Subscription matching and delivery snapshot creation semantics。
 - HTTP POST、signing、execution timeout recovery。
 - Retry/backoff product policy。
+- Deferred inbox / outbox persistence。
 
 ## Inputs
 
@@ -38,73 +39,84 @@ Out of scope：
 ## Publishing Flow
 
 ```text
-delivery publisher
-  -> find eligible PENDING deliveries
-  -> claim or identify publishable batch
+webhook inbound event consumer
+  -> create webhook_delivery rows in DB transaction
+  -> commit DB transaction
+  -> call delivery job publisher with created delivery ids
   -> publish webhook.delivery.execute with delivery id
-  -> record publication outcome if required by the selected recovery model
+  -> publish success: complete inbound message
+  -> publish failure: keep delivery PENDING and complete inbound message
 
-later publisher cycle
-  -> find deliveries whose jobs were not published successfully
-  -> publish again
+recovery cron
+  -> find stale PENDING deliveries whose jobs may not have been published
+  -> republish webhook.delivery.execute with delivery id
+  -> leave duplicate job safety to Stage 4 worker lock
 ```
+
+Stage 3 changes the normal path from polling-first publication to immediate post-commit publication. The cron path is recovery only; it should not be the normal source of delivery latency.
 
 ## Critical Decisions
 
 - Delivery execution queue 是 Webhook service-private job mechanism，不是 Fund / Webhook 跨 domain event contract。
 - Job payload 只需穩定 delivery identifier；worker 從 persistence 讀取 endpoint 與 payload snapshot。
-- Queue publish 與 DB state 無法視為單一 transaction；publish failure 必須可由後續 publisher cycle 補償。
+- Queue publish 與 DB state 無法視為單一 transaction；publish failure 必須可由 stale `PENDING` recovery 補償。
+- Inbound message may be completed after delivery DB commit even if delivery job publish fails, because the delivery record is recoverable。
 - Duplicate execution jobs are allowed only when Stage 4 worker state locking makes them safe。
 - Publisher 不重新 matching subscriptions，也不修改 delivery payload / endpoint snapshot。
-- Stage 3 owns unpublished / publish-failed pending delivery recovery；Stage 4 owns execution and stuck execution recovery。
-- Publication claim、queued marker 或 deterministic job id 的實際組合由 plan 依現有 BullMQ pattern與 concurrency requirements 定案。
+- Stage 3 owns post-commit delivery job publication and stale pending publish recovery；Stage 4 owns execution and stuck `DELIVERING` recovery。
+- Queued marker、deterministic job id 或 pure pending recovery 的實際組合由 plan 依現有 queue pattern 與 concurrency requirements 定案。
 
 ## Plan Inventory
 
-- Delivery publication query：找出可發布或需補發的 pending deliveries。
-- Private queue dispatcher：發布 delivery execution job。
-- Publisher trigger：以 scheduler、bootstrap backfill 或等效既有 pattern 觸發 publication cycles。
-- Targeted verification：驗證 successful publish、publish failure recovery、duplicate job safety boundary。
+- Delivery job publisher：發布 delivery execution job，input 為 delivery ids。
+- Inbound consumer post-commit integration：DB commit 後呼叫 publisher，publish failure 不 rollback delivery creation。
+- Stale pending recovery query：找出可能尚未成功發布 job 的 `PENDING` deliveries。
+- Recovery scheduler：週期性補發 stale pending delivery jobs。
+- Targeted verification：驗證 immediate publish、publish failure recovery、duplicate job safety boundary。
 
 ## Validation Direction
 
 Stage 3 完成時應能證明：
 
 ```text
-PENDING delivery
-  -> publisher emits webhook.delivery.execute
+newly committed PENDING delivery
+  -> post-commit publisher emits webhook.delivery.execute
   -> job contains delivery identifier
+  -> inbound message can be completed
 ```
 
 以及：
 
 ```text
-queue publish failure
-  -> delivery remains recoverable
-  -> later publisher cycle can publish the job
+post-commit queue publish failure
+  -> delivery remains PENDING
+  -> inbound message can be completed
+  -> recovery cron later publishes the job
 ```
 
 驗證重點：
 
 - Publisher 不建立第二筆 delivery。
 - Publisher 不重新查 subscription 或來源交易資料。
-- 多個 publisher cycle 不會造成不可控的 concurrent execution。
+- 多次 publish 或 recovery cycle 不會造成不可控的 concurrent execution。
+- Stage 3 不執行 HTTP POST；worker lock and final delivery result belong to Stage 4。
 
 ## Estimate
 
 | Item | 估時 |
 | --- | ---: |
-| Pending delivery publication capability | 1 天 |
-| Publish recovery and targeted verification | 1 天 |
+| Delivery job publisher capability | 0.75 天 |
+| Post-commit publish integration | 0.5 天 |
+| Stale pending recovery and targeted verification | 0.75 天 |
 
 總估時：2 天。
 
 ## Pattern Gaps
 
-- Fund BullMQ dispatcher / worker 與 scheduler / bootstrap backfill 可作為方向性 baseline，但 delivery publication 的 DB-to-queue recovery 仍是新組合，plan 必須明確決定 publication state 與 concurrent publisher claim strategy。
+- Fund BullMQ dispatcher / worker 與 scheduler / bootstrap backfill 可作為方向性 baseline，但 post-commit DB-to-queue publication 與 stale pending recovery 仍是新組合，plan 必須明確決定 queued marker、deterministic job id 或 pure pending recovery strategy。
 
 ## Open Points
 
-- 是否需要獨立 queued/published marker，或以 deterministic job id + pending query 支援補償。
-- Publisher batch size、cadence 與 concurrency claim strategy。
+- 是否需要獨立 queued/published marker，或以 deterministic job id + stale pending query 支援補償。
+- Stale pending threshold、recovery cadence 與 batch size。
 - Delivery identifier 在 private job payload 中的 primitive representation。

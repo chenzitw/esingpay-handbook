@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -16,12 +16,12 @@ updated_by: Codex
 
 交易狀態變更不是由 Fund service 同步呼叫 webhook service。Fund service 在處理交易狀態變更時向 queue 發出 domain event notification；Webhook service 訂閱該 queue，收到事件後直接 matching subscriptions 並建立 `webhook_delivery`。
 
-Webhook 第一版不保存 inbound event 的 outbox 或 inbox record。Delivery publisher 將 pending delivery job 放入 queue，等待 delivery worker 執行 HTTP POST 並更新 delivery status。
+Webhook 第一版不保存 inbound event 的 outbox 或 inbox record。Inbound consumer 建立 delivery 並 commit 後，立即發布 delivery execution job；若 publish 失敗，delivery 保持 `PENDING`，由 recovery cron 補發 job。
 
 因此第一版至少有兩段 queue：
 
 - Domain event notification queue：Fund service 發布交易事件狀態變更，webhook service 消費並直接建立 matching deliveries。
-- Webhook delivery execution queue：webhook delivery publisher 發布 delivery job，webhook worker 消費並執行 endpoint POST。
+- Webhook delivery execution queue：webhook inbound consumer 的 post-commit publisher 或 recovery scheduler 發布 delivery job，webhook worker 消費並執行 endpoint POST。
 
 Queue provider 第一版暫定採 Azure Service Bus。正式 queue/topic 名稱、consumer 設定、dead letter、retry/backoff、資源命名與部署設定留給 plan 依 infra convention 定案。
 
@@ -55,7 +55,7 @@ Topic 命名先採以下概念格式：
 | --- | --- | --- | --- | --- |
 | Domain event notification | `fund.deposit.status-changed` 或同級命名 | Fund service | Webhook inbound event consumer | 通知 webhook 某筆 deposit 狀態已變更，可 matching subscriptions 並建立 deliveries。 |
 | Domain event notification | `fund.withdrawal.status-changed` 或同級命名 | Fund service | Webhook inbound event consumer | 通知 webhook 某筆 withdrawal 狀態已變更，可 matching subscriptions 並建立 deliveries。 |
-| Delivery execution | `webhook.delivery.execute` | Webhook delivery publisher / recovery scheduler | Webhook delivery worker | 要求 worker 執行某一筆 delivery。 |
+| Delivery execution | `webhook.delivery.execute` | Webhook inbound consumer post-commit publisher / recovery scheduler | Webhook delivery worker | 要求 worker 執行某一筆 delivery。 |
 
 ## Domain Event Notification Payload
 
@@ -69,7 +69,7 @@ Conceptual envelope：
   "eventKey": "deposit.completed",
   "resourceType": "deposit",
   "resourceIdentifier": "67890",
-  "merchantId": "merchant_uuid",
+  "merchantId": "merchantUuid",
   "occurredAt": "2026-06-10T02:00:00.000Z",
   "data": {}
 }
@@ -90,7 +90,7 @@ Conceptual envelope：
 Domain event notification rules：
 
 - Webhook consumer 只接受 code-defined event catalog 內的 `eventKey`。
-- `source`、`eventKey`、`resourceType` 與 `resourceIdentifier` 會寫入每一筆 matching `webhook_delivery`。
+- `source`、`eventKey`、`resourceType` 與 `resourceIdentifier` 會映射並寫入每一筆 matching `webhook_delivery`。
 - Consumer matching subscriptions 與建立 deliveries 應在同一 DB transaction 內完成；commit 後才 complete inbound queue message。
 - 重送時以 `source + eventKey + resourceType + resourceIdentifier + subscription` 防止重複 delivery。
 - 沒有 matching subscription 時不建立 persistence record，consumer 可直接 complete message。
@@ -113,7 +113,7 @@ Conceptual envelope：
 Rules：
 
 - Worker 收到 `deliveryId` 後，必須從 persistence 讀取 delivery snapshot。
-- Worker 使用 delivery 上保存的 `endpoint_url` 與 `payload`，不重新查 subscription current endpoint 或交易現況。
+- Worker 使用 delivery 上保存的 endpoint snapshot 與 `payload`，不重新查 subscription current endpoint 或交易現況。
 - Worker 必須透過 delivery 狀態轉換鎖定任務，避免同一 delivery 被多個 worker 重複處理。
 - Recovery scheduler 可重新發布同一 `deliveryId`，由 worker lock 機制決定是否可執行。
 
@@ -124,16 +124,18 @@ inbound event consumer
   -> receive Fund domain event notification
   -> validate source, event key, resource and payload
   -> begin DB transaction
-  -> query active, non-deleted subscriptions by merchant_id + event_type
+  -> query active, non-deleted subscriptions by merchantId + eventKey
   -> if none: commit and complete inbound message without persistence
   -> if matches exist:
        create PENDING webhook_delivery per subscription
        ignore duplicate composite delivery identity safely
        commit DB transaction
+       publish webhook.delivery.execute per new delivery
+       publish failure: leave delivery PENDING for recovery
        complete inbound message
 ```
 
-If DB persistence fails, the inbound message must not be completed and remains eligible for redelivery or DLQ handling. If DB commit succeeds but message completion fails, redelivery relies on delivery composite uniqueness.
+If DB persistence fails, the inbound message must not be completed and remains eligible for redelivery or DLQ handling. If DB commit succeeds but delivery job publish fails, the inbound message can still be completed because stale `PENDING` delivery recovery republishes the job. If DB commit succeeds but inbound message completion fails, redelivery relies on delivery composite uniqueness and worker lock safety.
 
 ## Deferred Inbox Flow
 
@@ -161,12 +163,19 @@ inbox dispatcher
 ## Delivery Publishing Flow
 
 ```text
-delivery publisher
-  -> find PENDING deliveries eligible for publication
-  -> publish webhook.delivery.execute per delivery
-  -> record queued/published state if Stage 3 plan requires it
-  -> leave failed publications recoverable by later polling
+inbound event consumer
+  -> commit newly created webhook_delivery rows
+  -> call delivery job publisher with created delivery ids
+  -> publish webhook.delivery.execute per delivery id
+  -> publish success: complete inbound message
+  -> publish failure: keep delivery PENDING and complete inbound message
+
+recovery scheduler
+  -> find stale PENDING deliveries whose jobs may not have been published
+  -> republish webhook.delivery.execute per delivery id
 ```
+
+Delivery job publishing is outside the delivery creation DB transaction. The normal path publishes immediately after commit; polling exists only as recovery, not as the primary delivery latency path.
 
 ## Delivery Worker Flow
 
@@ -174,10 +183,10 @@ delivery publisher
 delivery worker
   -> receive delivery id
   -> lock PENDING delivery as DELIVERING
-  -> load payload snapshot and endpoint_url snapshot
+  -> load payload snapshot and endpoint snapshot
   -> load signing secret
   -> sign payload
-  -> POST endpoint_url
+  -> POST endpoint
   -> mark SUCCESS on 2xx
   -> mark FAILED on non-2xx / timeout / transport error
 ```
@@ -188,21 +197,22 @@ Worker must lock delivery via state transition or equivalent atomic mechanism so
 
 ```text
 recovery scheduler
-  -> find PENDING delivery older than threshold
+  -> find stale PENDING delivery whose job may not have been published
   -> find DELIVERING delivery stuck beyond timeout
+  -> reset or reclaim execution eligibility when required
   -> publish webhook.delivery.execute jobs
 ```
 
-First-version recovery only guarantees stuck jobs can be requeued. Retry count, backoff and manual resend are outside the first-version product scope unless Stage 4 plan decides minimal fields are required.
+First-version recovery only guarantees unpublished pending jobs and stuck execution can be requeued. Retry count, backoff and manual resend are outside the first-version product scope unless Stage 4 plan decides minimal fields are required.
 
 ## Failure Boundaries
 
 - Merchant endpoint timeout or 5xx must not affect the transaction domain flow.
 - Webhook inbound consumer failure must not drop the domain event notification silently.
 - Delivery creation must be atomic for all subscriptions matched during one consumer attempt.
-- Delivery publisher failure must not make pending deliveries permanently unprocessable.
+- Delivery job publish failure after DB commit must not make pending deliveries permanently unprocessable.
 - Delivery worker failure must not lose the delivery record.
-- Queue publish failure compensation must be explicit in Stage 3 / Stage 4 plans.
+- Queue publish failure compensation must be explicit in Stage 3; stuck execution compensation belongs to Stage 4.
 
 ## Flow
 
@@ -211,11 +221,12 @@ fund / transaction domain service
   -> publish domain event notification
   -> webhook inbound event consumer
   -> validate source + eventKey + resource
-  -> match subscription by merchant_id + event_type
+  -> match subscription by merchantId + eventKey
   -> create webhook_delivery PENDING per subscription
-  -> delivery publisher publishes webhook.delivery.execute
+  -> commit delivery rows
+  -> immediately publish webhook.delivery.execute with deliveryId
   -> delivery worker locks delivery
-  -> POST endpoint_url
+  -> POST endpoint
   -> update delivery status
 ```
 
@@ -227,4 +238,4 @@ fund / transaction domain service
 - `occurredAt` 的權威來源是交易狀態變更時間、交易 `updatedAt`，還是 producer 發送時間。
 - Delivery execution queue 是否需要額外 job metadata，例如 trace id、publishedAt、source。
 - Azure Service Bus queue/topic naming convention and consumer setting.
-- Pending delivery publisher polling cadence and publish-state representation.
+- Delivery publish recovery cadence and publish-state representation, if a queued/published marker is needed.

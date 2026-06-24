@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -35,8 +35,8 @@ Domain raw 表示 Fund service 在交易狀態變更時放入 domain event notif
 Domain raw 不包含以下 webhook 系統生成欄位：
 
 - webhook delivery id。
-- webhook payload `api_version`。
-- webhook payload `delivered_at`。
+- webhook payload `apiVersion`。
+- webhook payload `deliveredAt`。
 - signing header 或 signature。
 - retry / attempt metadata。
 
@@ -51,7 +51,7 @@ Conceptual fields：
 | Field | Required | 說明 |
 | --- | --- | --- |
 | `merchantId` | yes | 事件所屬商戶。 |
-| `withdrawalId` | yes | Withdrawal 識別值；對外 payload 命名為 `withdrawal_id`。 |
+| `withdrawalId` | yes | Withdrawal 識別值；對外 payload 命名為 `withdrawalId`。 |
 | `status` | yes | Withdrawal 在事件發生後的狀態。 |
 | `amount` | yes | Withdrawal 金額；對外 payload 應使用穩定 decimal string。 |
 | `asset` | yes | 資產代號，例如 `USDT`。 |
@@ -66,7 +66,7 @@ Conceptual fields：
 
 第一版 withdrawal event keys：
 
-| Event key | Domain raw family | Expected status meaning | `resource_type` |
+| Event key | Domain raw family | Expected status meaning | `resourceType` |
 | --- | --- | --- | --- |
 | `withdrawal.created` | `WithdrawalWebhookDomainRaw` | withdrawal 已建立。 | `withdrawal` |
 | `withdrawal.cancelled` | `WithdrawalWebhookDomainRaw` | withdrawal 已取消。 | `withdrawal` |
@@ -82,7 +82,7 @@ Conceptual fields：
 | Field | Required | 說明 |
 | --- | --- | --- |
 | `merchantId` | yes | 事件所屬商戶。 |
-| `depositId` | yes | Deposit 識別值；對外 payload 命名為 `deposit_id`。 |
+| `depositId` | yes | Deposit 識別值；對外 payload 命名為 `depositId`。 |
 | `status` | yes | Deposit 在事件發生後的狀態。 |
 | `amount` | yes | Deposit 金額；對外 payload 應使用穩定 decimal string。 |
 | `asset` | yes | 資產代號，例如 `USDT`。 |
@@ -100,7 +100,7 @@ Conceptual fields：
 
 第一版 deposit event keys：
 
-| Event key | Domain raw family | Expected status meaning | `resource_type` |
+| Event key | Domain raw family | Expected status meaning | `resourceType` |
 | --- | --- | --- | --- |
 | `deposit.created` | `DepositWebhookDomainRaw` | deposit 已建立。 | `deposit` |
 | `deposit.failed` | `DepositWebhookDomainRaw` | deposit 已失敗。 | `deposit` |
@@ -115,10 +115,10 @@ Mapping rules：
 
 - `source` 第一版固定為 `fund`，用於標示 producer service / bounded context。
 - `eventKey` 必須存在於 backend TypeScript code-defined event type catalog。
-- `resource_type` 由交易類型決定：withdrawal 事件使用 `withdrawal`，deposit 事件使用 `deposit`。
-- `resource_identifier` 使用該交易主體 id：withdrawal 使用 `withdrawalId`，deposit 使用 `depositId`。
-- `merchant_id` 來自 domain raw 的 `merchantId`。
-- `occurred_at` 預設由 raw 的狀態變更時間或 `updatedAt` 映射；具體來源由 Stage 2 plan 依交易模型決定。
+- `resourceType` 由交易類型決定：withdrawal 事件使用 `withdrawal`，deposit 事件使用 `deposit`。
+- `resourceIdentifier` 使用該交易主體 id：withdrawal 使用 `withdrawalId`，deposit 使用 `depositId`。
+- `merchantId` 來自 domain raw 的 `merchantId`。
+- `occurredAt` 預設由 raw 的狀態變更時間或 `updatedAt` 映射；具體來源由 Stage 2 plan 依交易模型決定。
 - Payload builder 將 domain raw 轉換為 [`design-payload-contract.md`](./design-payload-contract.md) 的 external envelope + `data` shape，並在建立 delivery 時保存 snapshot。
 - 第一版以 `source + eventKey + resourceType + resourceIdentifier + subscriptionId` 識別重複 delivery；此語意假設同一資源的同一 event key 只發生一次。
 
@@ -128,11 +128,11 @@ External webhook payload 使用固定 envelope，`data` 內只放商戶處理事
 
 第一版外部 payload 原則：
 
-- `withdrawal_id` / `deposit_id` 使用交易識別值。
+- `withdrawalId` / `depositId` 使用交易識別值。
 - `status` 使用商戶可理解的穩定狀態文字。
 - `amount` 使用 decimal string，避免 JSON number 精度問題。
 - Optional reason 欄位只有在產品決定對外揭露穩定 code / reason 時才加入。
-- `id`、`api_version`、`delivered_at` 由 webhook 系統補齊，不從 domain raw 輸入。
+- `id`、`apiVersion`、`deliveredAt` 由 webhook 系統補齊，不從 domain raw 輸入。
 
 ## Management Read Model Boundary
 
@@ -171,4 +171,4 @@ UI 顯示文字第一版使用 catalog 提供的 `displayName`；`eventKey` 仍�
 - Management read model 是否只服務 merchant console，或也會被 external API 文件引用。
 - Delivery internal DTO 是否需要獨立於 persistence entity 定義。
 - Failure / blocked / cancelled reason 是否納入第一版 external payload。
-- `occurred_at` 應使用交易狀態變更時間、交易 `updatedAt`，或 producer 發送時間。
+- `occurredAt` 應使用交易狀態變更時間、交易 `updatedAt`，或 producer 發送時間。

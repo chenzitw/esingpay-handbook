@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -57,14 +57,14 @@ delivery worker
 recovery scheduler
   -> find timeout DELIVERING delivery
   -> atomically reset or reclaim it as execution-eligible
-  -> reuse Stage 3 publication capability
+  -> reuse Stage 3 publisher capability after guarded reset
 ```
 
 ## Critical Decisions
 
 - Worker 必須透過狀態轉換鎖定 delivery，避免多 worker 重複處理同一任務。
-- Stage 3 owns pending delivery publication and publish-failure recovery；Stage 4 不建立第二套 pending publisher。
-- Recovery 必須先以 guarded state transition 讓 timeout `DELIVERING` 再次可執行，再重用 Stage 3 publication capability；不能只對仍為 `DELIVERING` 的 row 發 job。
+- Stage 3 owns post-commit delivery job publication and stale pending publish recovery；Stage 4 不建立第二套 pending publisher。
+- Recovery 必須先以 guarded state transition 讓 timeout `DELIVERING` 再次可執行，再重用 Stage 3 publisher capability；不能只對仍為 `DELIVERING` 的 row 發 job。
 - HTTP 2xx 視為 success；非 2xx、timeout 或 transport error 視為 failed。
 - 第一版若未導入 retry count，recovery 應只補償卡住任務，不做無限重試語意。
 - Signing secret 不能只存不可逆 hash，因 worker 需要用它產生簽章。
@@ -97,7 +97,7 @@ delivery job
 stuck DELIVERING delivery
   -> recovery scheduler
   -> guarded reset / reclaim
-  -> Stage 3 publication capability requeues execution job
+  -> Stage 3 publisher capability requeues execution job
 ```
 
 ## Estimate

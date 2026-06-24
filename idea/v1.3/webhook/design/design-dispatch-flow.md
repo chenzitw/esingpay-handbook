@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -11,25 +11,27 @@ updated_by: Codex
 Webhook dispatch 流程如下：
 
 1. Fund service 在 withdrawal 或 deposit 狀態變更時發布 domain event notification queue message。
-2. Webhook inbound event consumer 驗證 `source`、event type、resource 與 payload。
-3. Consumer 開始 DB transaction，根據 merchant 與 event type 找出未刪除且已訂閱該事件的 subscriptions。
+2. Webhook inbound event consumer 驗證 `source`、event key、resource 與 payload。
+3. Consumer 開始 DB transaction，根據 merchant 與 event key 找出未刪除且已訂閱該事件的 subscriptions。
 4. 若沒有 subscription，不建立 persistence record，commit 後完成 queue message。
 5. 若有 subscriptions，consumer 在該 transaction 內為每個 subscription 建立 pending delivery；每筆 delivery 保存來源、資源、endpoint 與 payload snapshot。
-6. Transaction commit 後才完成 inbound queue message；重送時由 delivery 複合唯一性避免重複建立。
-7. Delivery publisher 掃描 pending deliveries，發布 delivery execution queue messages；publish failure 由後續輪詢補償。
-8. Delivery worker 鎖定 pending delivery，POST 到 endpoint。
-9. 商戶 endpoint 回傳成功狀態時，delivery 標記成功。
-10. 商戶 endpoint 回傳失敗、timeout 或其他錯誤時，delivery 標記失敗。
-11. Recovery scheduler 補償 pending 或 timeout 的 delivery，避免任務永久卡住。
+6. Transaction commit 後，consumer 立即嘗試為新建 delivery 發布 delivery execution queue message，queue message 只需包含 `deliveryId`。
+7. 若 delivery job publish 成功，consumer 完成 inbound queue message；若 publish 失敗，delivery 保持 `PENDING`，consumer 仍可完成 inbound queue message，後續由 recovery cron 補發 delivery job。
+8. Inbound message redelivery 時，由 delivery 複合唯一性避免重複建立；若同一 delivery job 被重複發布，worker lock 負責防止重複 POST。
+9. Delivery worker 消費 delivery execution queue，鎖定 pending delivery，POST 到 endpoint。
+10. 商戶 endpoint 回傳成功狀態時，delivery 標記成功。
+11. 商戶 endpoint 回傳失敗、timeout 或其他錯誤時，delivery 標記失敗。
+12. Recovery scheduler 補償 stale pending 或 timeout 的 delivery，避免任務永久卡住。
 
 ## Constraints
 
 - Webhook 派送不得阻塞 withdrawal / deposit 的主交易流程。
 - Fund service 不直接寫入 webhook persistence，也不直接呼叫商戶 endpoint。
 - Webhook 第一版不保存 outbox 或 inbox event；consumer 只能針對未刪除且已訂閱目標事件的 subscription 建立 delivery。
-- Delivery 必須保存 `source`、`event_type`、`resource_type` 與 `resource_identifier`。
-- 第一版以 `source + event_type + resource_type + resource_identifier + subscription` 去重，並接受同一資源的同一 event type 只能發生一次的限制。
+- Delivery 必須保存 `source`、`eventKey`、`resourceType` 與 `resourceIdentifier`。
+- 第一版以 `source + eventKey + resourceType + resourceIdentifier + subscription` 去重，並接受同一資源的同一 event key 只能發生一次的限制。
 - 沒有訂閱者的事件不留 receipt；若 queue complete 失敗後 subscription 發生變動，redelivery 會依當下 subscription 重新 matching。
+- Delivery job publish 不與 delivery DB commit 共用 transaction；publish failure 必須由 stale `PENDING` recovery 補償。
 - Delivery worker 必須以鎖定機制避免同一筆 delivery 被多個 worker 重複處理。
 - 商戶 endpoint 的修改不應改寫歷史 delivery 的實際派送目標。
 - Queue topic 與 payload envelope 的討論基礎見 [`design-queue-topology.md`](./design-queue-topology.md)。
@@ -41,3 +43,6 @@ Webhook dispatch 流程如下：
 
 - Webhook service 為 inbound Fund event 建立自己的 outbox 或 inbox table。
   - 第一版不採用。時程優先下直接建立 delivery；缺少 inbound audit、replay 與 no-subscriber receipt 是已接受限制。
+
+- 以 cron polling publisher 作為正常 delivery job 發布主路徑。
+  - 不採用。正常路徑在 delivery commit 後立即 publish job；cron 只補償 publish failure 或卡住的 delivery。

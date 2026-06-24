@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -27,7 +27,7 @@ Out of scope：
 
 - Fund event publisher、transaction status hooks、producer outbox 與 Fund code changes。
 - Webhook outbox / inbox persistence。
-- Delivery execution job publishing。
+- Delivery execution job publishing and publish recovery；Stage 3 會把 post-commit publisher 接回本 consumer flow。
 - HTTP POST、signing 與 delivery retry。
 - Deferred inbox migration。
 
@@ -47,11 +47,11 @@ Stage 2 假設 Fund transaction domain event 已可由既有 transport 送達 We
 Consumer 必須取得：
 
 - `source`，第一版為 `fund`。
-- `event_type`。
-- `merchant_id`。
-- `resource_type`，第一版為 `deposit` 或 `withdrawal`。
-- `resource_identifier`。
-- `occurred_at`。
+- `eventKey`。
+- `merchantId`。
+- `resourceType`，第一版為 `deposit` 或 `withdrawal`。
+- `resourceIdentifier`。
+- `occurredAt`。
 - Payload builder 所需 domain raw。
 
 實際 transport envelope、shared contract landing 與 broker wiring 由 Stage 2 codebase plan 依 event adapter convention 定案，但不得將 Fund publisher implementation 納入 Webhook plan。
@@ -60,9 +60,9 @@ Consumer 必須取得：
 
 ```text
 webhook inbound event consumer
-  -> validate source + event type + resource + payload
+  -> validate source + eventKey + resource + payload
   -> begin webhook DB transaction
-  -> query active subscriptions by merchant_id + event_type
+  -> query active subscriptions by merchantId + eventKey
   -> no matches:
        commit without persistence
        complete inbound message
@@ -77,14 +77,14 @@ Persistence failure must leave the inbound message eligible for broker redeliver
 
 ## Critical Decisions
 
-- `source` 表示 producer service / bounded context，不與 `event_type` 或 `resource_type` 混用。
-- Delivery 保存 `source`、`event_type`、`resource_type`、`resource_identifier`、`merchant_id`、`occurred_at`、endpoint 與 payload snapshot。
+- `source` 表示 producer service / bounded context，不與 `eventKey` 或 `resourceType` 混用。
+- Delivery 保存 `source`、`eventKey`、`resourceType`、`resourceIdentifier`、`merchantId`、`occurredAt`、endpoint 與 payload snapshot。
 - Matching 必須透過 `webhook_subscription_event_type` relation，並排除 soft-deleted subscriptions。
-- 第一版以 `source + event_type + resource_type + resource_identifier + subscription` 防止重複 delivery。
-- 複合冪等假設同一 resource 的同一 event type 只發生一次。
+- 第一版以 `source + eventKey + resourceType + resourceIdentifier + subscription` 防止重複 delivery。
+- 複合冪等假設同一 resource 的同一 event key 只發生一次。
 - 沒有 matching subscription 時不建立 receipt；redelivery 會依當下 subscription 重新 matching。
-- Payload snapshot 在 delivery creation 時完成；Stage 3 publisher 與 Stage 4 worker 不重新查交易現況組 payload。
-- Stable producer `event_id` 與 deferred inbox 都不屬於本 stage。
+- Payload snapshot 在 delivery creation 時完成；Stage 3 post-commit publisher 與 Stage 4 worker 不重新查交易現況組 payload。
+- Stable producer `eventId`、deferred inbox、delivery job publish integration 都不屬於本 stage。
 
 ## Plan Inventory
 
@@ -128,7 +128,7 @@ inbound event + no matching subscription
 | Subscription matching and snapshot creation | 1 天 |
 | Targeted verification and broker-boundary checks | 1 天 |
 
-總估時：4 天。不包含 Fund producer 或新 broker infrastructure 的建置。
+總估時：4 天。不包含 Fund producer、新 broker infrastructure 或 Stage 3 delivery job publish integration 的建置。
 
 ## Pattern Gaps
 
@@ -139,4 +139,4 @@ inbound event + no matching subscription
 
 - Webhook consumer 實際接入的既有 topic / subscription 與 transport envelope。
 - Domain raw 是完整放入 event，或由已存在的 consumer contract 提供足夠 payload building data。
-- `occurred_at` 的 authoritative field。
+- `occurredAt` 的 authoritative field。

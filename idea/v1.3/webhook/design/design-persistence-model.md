@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -58,11 +58,11 @@ Catalog 草稿事件：
 - Webhook inbound event consumer 直接 matching subscriptions，為每個 matching subscription 建立一筆 `webhook_delivery`。
 - Delivery 保存事件來源、業務資源、`endpoint_url` 與 `payload` snapshot。
 - 若沒有 matching subscription，不建立 persistence record；第一版不提供 inbound event receipt、replay 或 no-subscriber audit。
-- 目前 Fund event 沒有穩定 `event_id`，因此第一版以來源與資源複合語意防止重複 delivery。Producer 提供穩定 `event_id` 是導入 deferred inbox 的前置條件。
+- 目前 Fund event 沒有穩定 `eventId`，因此第一版以來源與資源複合語意防止重複 delivery。Producer 提供穩定 `eventId` 是導入 deferred inbox 的前置條件。
 
 ## Deferred Inbox Persistence
 
-`webhook_inbox_event` 是已確認但延後落地的可靠性目標。第一版不建立此 table；當 producer 提供穩定 `event_id` 後，應以 migration 與後續 blueprint 導入。
+`webhook_inbox_event` 是已確認但延後落地的可靠性目標。第一版不建立此 table；當 producer 提供穩定 `eventId` 後，應以 migration 與後續 blueprint 導入。
 
 目標用途：
 
@@ -187,5 +187,5 @@ Plan 需讓 persistence 支援以下查詢與一致性需求；實際 index、co
 
 - Stage 1 建立 `webhook_subscription`、`webhook_subscription_event_type`，並建立 code-defined event type catalog。
 - Stage 2 建立 `webhook_delivery`，並完成 inbound event matching、payload snapshot 與複合冪等保護。
-- Stage 3 發布 pending delivery execution jobs，並補償 queue publish failure。
+- Stage 3 在 delivery commit 後發布 execution job，並補償 stale pending delivery 的 queue publish failure。
 - Stage 4 補足 delivery worker、recovery 與 signing 所需欄位；若需要 retry count 或 next retry time，需回到本文件更新 conceptual inventory。

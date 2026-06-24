@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
@@ -41,9 +41,9 @@ Fund / transaction capability owns：
 - `domain event notification`：上游服務發布、供 webhook 消費的業務事件訊息。
 - `webhook_delivery`：某 inbound event 對某 subscription endpoint 的派送任務與結果，並保存來源與資源追蹤資訊。
 - `inbound event consumer`：驗證 domain event、matching subscriptions 並直接建立 delivery。
-- `delivery publisher`：掃描 pending delivery 並發布 execution job。
+- `delivery publisher`：在 delivery commit 後發布 execution job；recovery cron 僅補發 stale pending delivery job。
 - `delivery worker`：執行 delivery HTTP POST。
-- `recovery scheduler`：補償 pending 或 timeout delivery。
+- `recovery scheduler`：補償 stale pending publish failure 或 timeout delivery。
 
 ## Suggested Service Boundaries
 
@@ -52,7 +52,7 @@ Fund / transaction capability owns：
 - Subscription management：create / list / get / update / delete subscription。
 - Event type catalog：code-defined catalog query and validation。
 - Inbound event consumption：驗證 queue event、mapping payload、matching subscriptions and creating deliveries。
-- Delivery publishing：finding pending deliveries and publishing execution jobs。
+- Delivery publishing：publishing execution jobs after delivery commit and republishing stale pending deliveries for recovery。
 - Delivery execution：locking delivery, signing payload, POST endpoint, updating result。
 - Recovery：finding stuck delivery and requeueing.
 
@@ -62,7 +62,7 @@ Plan 可依 codebase 現有 module convention 決定是否拆成多個 module。
 
 - Trading domain 不直接呼叫 merchant endpoint。
 - Webhook service 不擁有 producer outbox。第一版不為 inbound event 建立 inbox record；deferred inbox 導入後，inbox persistence 與 dispatch state 由 Webhook service 擁有。
-- Inbound event consumer 建立 delivery 時即保存 payload snapshot；publisher 與 worker 不重新查交易現況組 payload。
+- Inbound event consumer 建立 delivery 時即保存 payload snapshot；post-commit publisher 與 worker 不重新查交易現況組 payload。
 - Delivery worker 不重新查 subscription 的 current endpoint 作為發送目標；它使用 delivery endpoint snapshot。
 - Subscription management 不處理 delivery execution。
 - Event type catalog 是系統設定資料，由 TypeScript 檔案定義，不由商戶 UI CRUD，也不建 DB table。
@@ -110,7 +110,7 @@ inbound event consumer
 
 - Stage 1 owns subscription management and event type catalog.
 - Stage 2 owns inbound event consumption, subscription matching and delivery creation.
-- Stage 3 owns pending delivery job publishing and publish recovery.
+- Stage 3 owns post-commit delivery job publishing and stale pending publish recovery.
 - Stage 4 owns delivery worker, signing and recovery.
 
 ## Open Points

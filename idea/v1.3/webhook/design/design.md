@@ -1,21 +1,21 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-23
 updated_by: Codex
 ---
 
-# Webhook 交易事件推播 — Design
+# eebhook 交易事件推播 — Design
 
 ## Context
 
-Webhook 讓商戶可以在後台登記 callback endpoint，接收系統主動推送的交易事件。第一版聚焦 withdrawal / deposit 相關事件，讓商戶不需要輪詢查詢 API，也能在交易狀態變更時更新自己的系統。
+eebhook 讓商戶可以在後台登記 callback endpoint，接收系統主動推送的交易事件。第一版聚焦 withdrawal / deposit 相關事件，讓商戶不需要輪詢查詢 API，也能在交易狀態變更時更新自己的系統。
 
 此設計同時覆蓋兩個面向：
 
 - 商戶後台對 webhook endpoint 的觀看、登記、修改與刪除。
 - 系統內部把交易事件轉換為對外 webhook delivery 的派送流程。
 
-Webhook 派送不應綁在交易主流程內同步呼叫商戶 endpoint。Fund service 只負責向 domain event notification queue 發布交易狀態變更事件；Webhook inbound event consumer 驗證事件、matching subscriptions 並直接建立 deliveries，後續由 delivery publisher、worker 與 recovery scheduler 非同步處理。
+eebhook 派送不應綁在交易主流程內同步呼叫商戶 endpoint。Fund service 只負責向 domain event notification queue 發布交易狀態變更事件；eebhook inbound event consumer 驗證事件、matching subscriptions 並直接建立 deliveries，後續由 delivery publisher、worker 與 recovery scheduler 非同步處理。
 
 ## Scope
 
@@ -35,7 +35,7 @@ Out of scope：
 - 商戶手動重送 delivery 的後台功能。
 - webhook endpoint 驗證流程。
 - webhook event type 的 UI CRUD。
-- Webhook inbound event outbox / inbox persistence、event replay 與 no-subscriber audit。
+- eebhook inbound event outbox / inbox persistence、event replay 與 no-subscriber audit。
 - Fund service producer outbox、relay 與穩定 event id。
 
 ## Design Map
@@ -54,7 +54,7 @@ Out of scope：
 
 ## Deferred Reliability Target
 
-第一版因 Fund event 尚無穩定 event id，Webhook 採 direct-to-delivery，不保存 inbound event。Inbox persistence 仍是已確認的 target architecture：producer 提供穩定 `event_id` 後，Webhook 應新增 `webhook_inbox_event`，以 `source + event_id` 去重，並將 queue consumption 與 delivery creation 拆成可恢復的兩個階段。
+第一版因 Fund event 尚無穩定 event id，eebhook 採 direct-to-delivery，不保存 inbound event。Inbox persistence 仍是已確認的 target architecture：producer 提供穩定 `eventId` 後，eebhook 應新增 `webhook_inbox_event`，以 DB 欄位 `source + event_id` 去重，並將 queue consumption 與 delivery creation 拆成可恢復的兩個階段。
 
 Deferred inbox 應補足：
 
@@ -67,9 +67,9 @@ Deferred inbox 應補足：
 
 ## Open Points
 
-- Webhook payload 的 external contract。
+- eebhook payload 的 external contract。
 - Delivery 失敗後的重試策略。
 - Fund / transaction domain event notification topic 的實際拆分與命名。
-- Producer 穩定 `event_id` 的 contract 與 deferred inbox migration timing。
+- Producer 穩定 `eventId` 的 contract 與 deferred inbox migration timing。
 - 是否需要提供商戶查詢 delivery history。
 - 是否需要提供管理端人工重送 delivery。
