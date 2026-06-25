@@ -1,11 +1,13 @@
 ---
-status: draft
-updated_at: 2026-05-24
-updated_by: Tim
-remark: 本文件未依照 proposal 規範撰寫，暫供內容參考，等待後續重構改寫。
+status: superseded
+updated_at: 2026-06-26
+updated_by: Claude
+remark: 本草稿已由 v1.3 的 superjson-wire-codec-proposal.md 重寫取代；保留原位作歷史記錄，內容不再維護。
 ---
 
 # Contract-RPC SuperJSON Adoption Proposal
+
+> **Superseded** — 本草稿已由 [v1.3 superjson-wire-codec-proposal.md](../../v1.3/architecture-improvement/superjson-wire-codec-proposal.md) 重寫取代並擴張為 RPC + event 聯合提案。方向之審議在新文進行；此文僅留作歷史素材,內容(scope、cleanup 主張、codec API)多已被新文修正,勿據此實作。
 
 ## 核心判斷
 
