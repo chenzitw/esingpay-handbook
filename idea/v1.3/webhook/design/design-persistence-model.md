@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-23
+updated_at: 2026-06-29
 updated_by: Codex
 ---
 
@@ -25,7 +25,7 @@ updated_by: Codex
 
 - Webhook persistence record 需要有穩定內部識別值，對外 management API 使用平台 short id string representation。
 - `merchant_id` 對齊既有 merchant identity 語意，作為 subscription ownership 與 inbound consumer matching 的主要 scope。
-- `resource_identifier` 表示 withdrawal / deposit 等來源交易主體識別值，實際 primitive 由對應交易模型與 plan 決定。
+- `resource_identifier` 表示 withdrawal intent / deposit 等來源交易主體識別值，實際 primitive 由對應交易模型與 plan 決定。
 - 時間欄位需保留具時區語意，讓 list sorting、delivery snapshot 與 recovery 判斷可穩定運作。
 
 ## Subscription State
@@ -67,9 +67,9 @@ Catalog 草稿事件：
 目標用途：
 
 - 保存 Webhook 已接收的 domain event，不依賴是否存在 matching subscription。
-- 以 producer event id 處理 queue redelivery 去重。
+- 以 producer event id 處理 broker redelivery 去重。
 - 支援 no-subscriber receipt、inbound audit 與後續 replay。
-- 將 queue consumption 與 subscription matching / delivery creation 分成可恢復的兩個階段。
+- 將 inbound event consumption 與 subscription matching / delivery creation 分成可恢復的兩個階段。
 
 目標概念欄位：
 
@@ -90,7 +90,7 @@ Catalog 草稿事件：
 
 - `source + event_id` 唯一。
 - `status` 第一版目標只需 `PENDING` / `DISPATCHED`。
-- Consumer commit inbox event 後才 complete inbound queue message；duplicate event 可安全 complete。
+- Consumer commit inbox event 後才 complete inbound event message；duplicate event 可安全 complete。
 - Dispatcher 完成 matching 與 delivery creation 後標記 `DISPATCHED`；沒有 matching subscription 時同樣標記 `DISPATCHED`。
 - Delivery 導入 `inbox_event_id` reference，並以 `inbox_event_id + webhook_subscription_id` 防止重複建立。
 - 導入 inbox 後，第一版 direct-to-delivery 複合唯一鍵可保留為追蹤 index 或降級防線，但不再是主要事件冪等識別。
@@ -159,12 +159,19 @@ Catalog 草稿事件：
 - `SUCCESS`
 - `FAILED`
 
+狀態語意：
+
+- 第一版不做 retry/backoff；`FAILED` 是 terminal status。
+- HTTP non-2xx、10 秒 request timeout、transport error 或 stuck `DELIVERING` recovery 都會讓 delivery 進入 `FAILED`。
+- 第一版不需要 `RETRYING`、retry count、next retry time 或 attempt 欄位；若未來導入 retry policy，需回到本文件更新 conceptual inventory。
+
 約束：
 
 - `webhook_subscription_id` 對應派送建立當下的 subscription。
 - `source` 表示事件來源服務或 bounded context；第一版固定為 `fund`。
 - `event_type` 保存 code-defined webhook event key。
-- `resource_type` 第一版為 `deposit` 或 `withdrawal`；`resource_identifier` 保存對應交易識別值。
+- `resource_type` 第一版為 `deposit` 或 `withdrawal-intent`，用於追蹤上游 Fund subject；`event_type` 仍保存對外 webhook event key，例如 `withdrawal.completed`。
+- `resource_identifier` 保存對應交易識別值；withdrawal 事件保存 `WithdrawalIntent.id`，deposit 事件保存 `Deposit.id`。
 - `endpoint_url` 保存派送當下的 URL snapshot。
 - `payload` 保存派送當下的 payload snapshot。
 - 第一版需以 `source + event_type + resource_type + resource_identifier + webhook_subscription_id` 建立 unique constraint 或等效一致性保護。
@@ -188,4 +195,4 @@ Plan 需讓 persistence 支援以下查詢與一致性需求；實際 index、co
 - Stage 1 建立 `webhook_subscription`、`webhook_subscription_event_type`，並建立 code-defined event type catalog。
 - Stage 2 建立 `webhook_delivery`，並完成 inbound event matching、payload snapshot 與複合冪等保護。
 - Stage 3 在 delivery commit 後發布 execution job，並補償 stale pending delivery 的 queue publish failure。
-- Stage 4 補足 delivery worker、recovery 與 signing 所需欄位；若需要 retry count 或 next retry time，需回到本文件更新 conceptual inventory。
+- Stage 4 補足 delivery worker、recovery 與 signing；第一版不新增 retry count 或 next retry time。

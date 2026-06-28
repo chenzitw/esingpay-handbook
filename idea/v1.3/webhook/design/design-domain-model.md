@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-22
+updated_at: 2026-06-29
 updated_by: Codex
 ---
 
@@ -162,7 +162,7 @@ Conceptual properties：
 Target rules：
 
 - `source + sourceEventId` 必須唯一，用於 queue redelivery 去重。
-- Consumer 必須先 commit inbox event，再 complete inbound queue message。
+- Consumer 必須先 commit inbox event，再 complete inbound event message。
 - Dispatcher 從 pending inbox event 建立 deliveries；沒有 matching subscription 時仍保留 inbox event 並標記 `DISPATCHED`。
 - Inbox event 支援 inbound audit、no-subscriber receipt 與後續 replay；它不代表 webhook 已送達商戶 endpoint。
 - Delivery 應以 `inboxEventId + subscriptionId` 防止同一 inbox event 對同一 subscription 重複建立。
@@ -188,7 +188,7 @@ Conceptual properties：
 | `merchantId` | 此 delivery 所屬商戶。 |
 | `source` | 事件來源服務或 bounded context；第一版固定為 `fund`。 |
 | `eventType` | 穩定 webhook event key，例如 `deposit.completed`。 |
-| `resourceType` | 業務資源類型，例如 `deposit` 或 `withdrawal`。 |
+| `resourceType` | 上游業務資源類型，例如 `deposit` 或 `withdrawal-intent`。 |
 | `resourceIdentifier` | 業務資源識別值。 |
 | `occurredAt` | 上游交易事件發生時間。 |
 | `endpointUrl` | 派送當下的 callback URL snapshot。 |
@@ -209,6 +209,7 @@ Domain rules：
 
 - Delivery 是以 endpoint 為單位追蹤派送結果的任務。
 - 同一 inbound event 可以為多個 matching subscriptions 建立 delivery，各自獨立成功或失敗。
+- Delivery 的 `resourceType` / `resourceIdentifier` 追蹤上游 Fund subject；withdrawal 類 webhook event 第一版使用 `resourceType = withdrawal-intent` 與 `WithdrawalIntent.id`，對外 webhook `eventType` 與 payload 命名仍使用 `withdrawal`。
 - 第一版以 `source + eventType + resourceType + resourceIdentifier + subscriptionId` 識別重複 delivery。
 - 此複合識別假設同一業務資源的同一 event type 只會發生一次，只適用於 direct-to-delivery MVP。
 - 引入 deferred inbox model 後，應改由 `inboxEventId + subscriptionId` 去重，並保留來源／資源欄位供追蹤。

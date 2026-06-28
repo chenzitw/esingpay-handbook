@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-23
+updated_at: 2026-06-29
 updated_by: Codex
 ---
 
@@ -14,7 +14,7 @@ Stage 1 codebase plan 採 `contract-rest + RestRpc` 作為 gateway-to-cradle man
 
 ## Capability Boundary
 
-Webhook 是交易事件推播能力的 owner。Fund service 不應直接建立 webhook delivery 或呼叫商戶 endpoint；它只需向 domain event notification queue 發布「某交易事件已發生」。
+Webhook 是交易事件推播能力的 owner。Fund service 不應直接建立 webhook delivery 或呼叫商戶 endpoint；它只需向 Azure Service Bus event topic 發布「某交易事件已發生」。
 
 Merchant console / platform console 不直接呼叫 webhook service。後台管理 flow 由 api-gateway 暴露 REST route，再透過 REST RPC proxy 呼叫 webhook service management capability：
 
@@ -32,7 +32,7 @@ merchant console / platform console
 
 ```text
 fund service
-  -> domain event notification queue
+  -> Azure SB event topic fund.<resource>.status-changed
   -> webhook inbound event consumer
   -> subscription matching
   -> webhook_delivery
@@ -212,7 +212,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 ### Consume Domain Event
 
-用途：讓 webhook inbound consumer 接收 Fund domain event，matching subscriptions 並直接建立 deliveries。這是 queue-triggered internal capability，不暴露為 management RPC。
+用途：讓 webhook inbound consumer 接收 Fund domain event，matching subscriptions 並直接建立 deliveries。這是 event-triggered internal capability，不暴露為 management RPC。
 
 概念 input：
 
@@ -232,7 +232,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 決策：
 
 - 第一版 `source` 固定為 `fund`；event type 必須存在於 code-defined catalog。
-- Matching subscriptions 與建立 deliveries 應在同一 DB transaction 內完成，commit 後才 complete inbound queue message。
+- Matching subscriptions 與建立 deliveries 應在同一 DB transaction 內完成，commit 後才 complete inbound event message。
 - 沒有 matching subscription 時不建立 persistence record。
 - 重複訊息由 delivery 的來源／資源／subscription 複合唯一性安全忽略。
 
@@ -249,7 +249,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 
 - matching subscription list
 
-這個 capability 是 webhook service method，不需要 contract-rpc；Fund service 只透過 queue 發布事件。
+這個 capability 是 webhook service method，不需要 contract-rpc；Fund service 只透過 Azure SB event topic 發布事件。
 
 ### Create Delivery
 
@@ -279,20 +279,22 @@ Merchant / platform route keys may map to the same webhook service management RP
 - success / failed result
 - delivery status after execution
 
-這個 capability 通常由 queue consumer 觸發，不一定暴露為 RPC。
+這個 capability 通常由 BullMQ job consumer 觸發，不一定暴露為 RPC。
 
-### Recover Stuck Deliveries
+### Recover Deliveries
 
-用途：recovery scheduler 找出 stale pending 或 timeout 的 delivery 並重新投入 delivery queue。
+用途：recovery scheduler 找出 stale `PENDING` delivery 補發 execution job，並找出 timeout `DELIVERING` delivery 標記為 terminal `FAILED`。
 
 概念 input：
 
-- timeout cutoff
+- pending cutoff
+- delivering timeout cutoff
 - batch size
 
 概念 output：
 
-- requeued count
+- requeued pending count
+- failed stuck delivery count
 
 ## Route Ownership
 
@@ -305,7 +307,7 @@ Merchant / platform route keys may map to the same webhook service management RP
 ## Stage Relationship
 
 - Stage 1 需要 subscription management capability，供 api-gateway REST RPC proxy 呼叫。
-- Stage 2 落地 queue-triggered inbound event consumption、subscription matching 與 delivery creation capability。
+- Stage 2 落地 event-triggered inbound event consumption、subscription matching 與 delivery creation capability。
 - Stage 3 落地 post-commit delivery job publishing 與 stale pending publish recovery capability。
 - Stage 4 需要 delivery execution 與 recovery capability。
 

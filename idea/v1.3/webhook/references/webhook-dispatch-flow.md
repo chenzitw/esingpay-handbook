@@ -8,7 +8,7 @@ updated_by: Codex
 
 This reference preserves an early Mermaid baseline for the webhook dispatcher, delivery worker, and recovery flow.
 
-It is not the current source of truth for naming or schema details. Current decisions in [`../blueprint/blueprint.md`](../blueprint/blueprint.md), [`../design/design-persistence-model.md`](../design/design-persistence-model.md), and [`../design/design-queue-topology.md`](../design/design-queue-topology.md) override this reference.
+It is not the current source of truth for naming or schema details. Current decisions in [`../blueprint/blueprint.md`](../blueprint/blueprint.md), [`../design/design-persistence-model.md`](../design/design-persistence-model.md), [`../design/design-inbound-event-contract.md`](../design/design-inbound-event-contract.md), and [`../design/design-queue-topology.md`](../design/design-queue-topology.md) override this reference.
 
 Known differences from the current blueprint include:
 

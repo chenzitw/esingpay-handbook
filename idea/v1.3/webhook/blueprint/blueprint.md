@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-23
+updated_at: 2026-06-29
 updated_by: Codex
 ---
 
@@ -15,14 +15,15 @@ updated_by: Codex
 - [`../design/design-rest.md`](../design/design-rest.md)：merchant / platform management REST contract semantics。
 - [`../design/design-rpc.md`](../design/design-rpc.md)：webhook service management transport boundary。
 - [`../design/design-persistence-model.md`](../design/design-persistence-model.md)：direct-to-delivery persistence 與 deferred inbox target。
-- [`../design/design-queue-topology.md`](../design/design-queue-topology.md)：inbound domain event、private delivery job、post-commit publisher / worker / recovery flow。
+- [`../design/design-inbound-event-contract.md`](../design/design-inbound-event-contract.md)：Fund broadcast event topic / subscription、transport envelope、payload 與 consumer handling rules。
+- [`../design/design-queue-topology.md`](../design/design-queue-topology.md)：private delivery job、post-commit publisher / worker / recovery queue topology。
 - [`../design/design-payload-contract.md`](../design/design-payload-contract.md)：outbound webhook payload contract。
 - [`../design/design-service-boundary.md`](../design/design-service-boundary.md)：ownership 與 service boundary。
 
 第一版 Webhook scope 目標：
 
 - 商戶後台管理 webhook subscription。
-- Webhook 消費既有 Fund transaction event，依 subscription 直接建立 deliveries。
+- Webhook 經 Azure Service Bus Topic / session-enabled Subscription 消費 Fund transaction event，依 subscription 直接建立 deliveries。
 - Webhook 追蹤每個 endpoint 的 delivery 結果。
 - Webhook 以 private queue job 非同步執行 delivery，並補償 publish failure 或 stuck execution。
 
@@ -46,10 +47,10 @@ Out of scope：
 - Fund event publisher、transaction status hooks、producer outbox 與 Fund code changes。
 - Webhook inbox persistence in the first version。
 - Migration SQL、ORM class、method signature 與實際檔案 placement。
-- Signature 演算法與驗簽 header 的最終規格。
-- 完整 retry/backoff product policy、人工重送與 delivery history UI。
+- Signing secret rotation UI/API。
+- Retry/backoff、人工重送與 delivery history UI。
 - Endpoint ownership verification flow。
-- 新 broker infrastructure 建置；若既有 transport 無法承載 inbound event，需另行決策與估算。
+- Azure Service Bus broker infrastructure 建置；若 service-kit 尚未具備 session-aware inbound event adapter，需另行決策與估算。
 
 ## Landed Facts Assumed
 
@@ -60,7 +61,7 @@ Out of scope：
 - `source`、`eventKey`、`resourceType`、`resourceIdentifier` 是 inbound traceability 的共用詞彙；第一版 `source = fund`。
 - Codebase guide 將跨 capability asynchronous fact 視為 Event，將 delivery execution 視為 Webhook service-private Queue job。
 - Fund service 已有 BullMQ dispatcher / worker 與 scheduler / bootstrap backfill precedent，可作為 private delivery job 的方向性 baseline。
-- Codebase 目前沒有 Fund domain event definition，也未找到 Azure Service Bus adapter precedent。
+- Codebase 目前沒有 Fund domain event definition，也未找到 Azure Service Bus session-aware adapter precedent。
 
 ## Critical Decisions
 
@@ -70,7 +71,10 @@ Out of scope：
 - Delivery 第一版以 `source + eventKey + resourceType + resourceIdentifier + subscription` 防止重複建立。
 - 沒有 matching subscription 時不建立 receipt；此限制明確由 direct-to-delivery MVP 承擔。
 - Inbound domain event 與 Webhook private delivery job 是不同 contract surface，不共用 queue job vocabulary。
+- Inbound domain event 走 Azure Service Bus Topic / session-enabled Subscription；Webhook private delivery job 保留 BullMQ。
 - Stage 3 owns post-commit delivery job publication and stale pending publish recovery；Stage 4 owns execution and stuck execution recovery。
+- Stage 4 第一版不做 retry/backoff；HTTP non-2xx、10 秒 timeout 或 transport error 直接標記 terminal `FAILED`。
+- Stage 4 第一版使用 HMAC-SHA256 簽章，簽章 input 為 `<timestamp> + "." + <raw JSON request body bytes interpreted as UTF-8>`。
 - Deferred inbox 是已確認的 reliability target，但不進入第一版 stage estimate。
 
 ## Stage Breakdown
@@ -91,14 +95,14 @@ Status：Stage 1 implementation complete；migration must be applied before end-
 
 ### Stage 2：Inbound Event Consumption And Delivery Creation
 
-Webhook 消費既有 Fund transaction event，matching active subscriptions，並直接建立 pending delivery snapshots。
+Webhook 經 Azure Service Bus Topic / session-enabled Subscription 消費 Fund transaction event，matching active subscriptions，並直接建立 pending delivery snapshots。
 
 詳細 blueprint：[`blueprint-stage-2.md`](./blueprint-stage-2.md)
 
 依賴：
 
 - Stage 1 subscription relation and event catalog 已落地。
-- 既有 transport 能將包含必要 source / event / resource / payload semantics 的 event 送達 Webhook boundary。
+- Azure Service Bus session-enabled subscription 能將包含必要 source / event / resource / payload semantics 的 event 送達 Webhook boundary。
 
 完成能力：
 
@@ -119,7 +123,7 @@ Delivery DB commit 後立即發布 Webhook private execution job；若暫時 pub
 
 完成能力：
 
-- Newly committed delivery 可立即發布為 `webhook.delivery.execute` job。
+- Newly committed delivery 可立即發布為 BullMQ `webhook.delivery.execute` job。
 - Publish failure 後 delivery 仍可由 stale pending recovery 補發。
 
 ### Stage 4：Delivery Worker, Recovery And Signing
@@ -131,30 +135,31 @@ Worker 執行 endpoint POST、更新 delivery 結果；recovery 補償 stuck exe
 依賴：
 
 - Stage 3 已能發布 delivery execution job。
-- Signing secret 來源、header 與 timeout / retry 第一版策略已決定。
+- Signing secret 來源、HMAC-SHA256 header 與 10 秒 timeout / no-retry 第一版策略已決定。
 - Delivery payload snapshot 符合 [`../design/design-payload-contract.md`](../design/design-payload-contract.md)。
 
 完成能力：
 
 - Worker 鎖定 delivery、簽章並 POST endpoint。
 - Delivery success / failure 可追蹤。
-- Stuck execution 可被 recovery flow 重新投入 worker queue。
+- Stuck execution 可被 recovery flow terminally marked `FAILED`。
 
 ## End-To-End Flow
 
 ```text
-existing Fund transaction event transport
-  -> Webhook inbound event consumer
-  -> validate source + event type + resource + payload
+Azure SB event topic fund.<resource>.status-changed with sessionId
+  -> Webhook inbound event consumer on srv-webhook subscription
+  -> validate envelope + subject + change
+  -> map namespace + subjectType + subjectId + change to webhook source + eventKey + resource + merchant scope
   -> match active subscriptions by merchantId + eventKey
   -> create PENDING webhook_delivery per subscription
   -> commit delivery rows
   -> delivery publisher immediately emits private execution job
   -> delivery worker locks delivery
   -> sign payload
-  -> POST endpoint_url
+  -> POST endpoint_url with 10 second timeout
   -> update delivery status
-  -> recovery requeues stuck execution when needed
+  -> recovery marks stuck execution FAILED when needed
 ```
 
 ## Deferred Inbox Target
@@ -175,7 +180,7 @@ Dependencies：
 - Stage 1 已完成，是 Stage 2 subscription matching 的前置條件。
 - Stage 2 必須先建立 delivery persistence 與 snapshot semantics，Stage 3 才能接上 post-commit publication。
 - Stage 3 必須先提供 execution job，Stage 4 worker 才能完整驗證。
-- Fund producer implementation 可由外部工作流獨立進行；Webhook blueprint 不安排其 sequencing。
+- Fund producer implementation 與 Azure SB infrastructure provisioning 可由外部工作流獨立進行；Webhook blueprint 不安排其 sequencing。
 
 Parallelism：
 
@@ -204,20 +209,20 @@ Delivery cadence：
 | --- | ---: | --- |
 | Remaining Stage 2–4 | 11 天 | Webhook implementation only。 |
 | Whole Stage 1–4 | 17 天 | Stage 1 已完成；不含 Fund / broker infrastructure。 |
-| Remaining calendar | 約 2.5–3 週 | 取決於 inbound transport availability 與 signing decisions。 |
+| Remaining calendar | 約 2.5–3 週 | 取決於 inbound transport availability 與 Stage 3 publication strategy。 |
 
 ## Pattern Gaps
 
 - Fund domain event definition 尚不存在。Stage 2 plan 需確認 Webhook consumer-side shared contract landing；不得擴張為 Fund publisher implementation。
-- Azure Service Bus adapter precedent 未找到。若 inbound transport 必須新建 provider integration，應先形成 infrastructure decision 並額外估算。
-- Post-commit DB-to-private-queue publication 與 stale pending recovery 是既有 BullMQ dispatcher 與 scheduler precedent 的新組合；Stage 3 plan 必須鎖定 queued marker、deterministic job id 或 pure pending recovery strategy。
-- Signing secret handling 與 webhook signature contract 尚未定案，Stage 4 plan 前需解決。
+- Azure Service Bus session-aware adapter precedent 未找到。若 inbound transport 必須新建 provider integration，應先形成 infrastructure decision 並額外估算。
+- Post-commit DB-to-BullMQ publication 與 stale pending recovery 是既有 BullMQ dispatcher 與 scheduler precedent 的新組合；Stage 3 plan 必須鎖定 queued marker、deterministic job id 或 pure pending recovery strategy。
+- Signing secret 第一版採 runtime global default secret；secret rotation 與 per-subscription secret 不進入本版。
 
 ## Open Points
 
-- Webhook consumer 實際接入的既有 topic / subscription、transport envelope 與 broker completion semantics。
+- Webhook consumer 實際接入的 Azure SB topic / session-enabled subscription、transport envelope 與 broker completion semantics。
 - Stage 3 publication state：queued marker、deterministic job id、stale pending threshold 或其他 recovery model。
-- Delivery timeout、failure / retry status 與 recovery cadence。
-- Webhook signature algorithm、header naming 與 verification documentation。
+- Stage 4 stuck `DELIVERING` recovery scheduler cadence。
+- Webhook signature verification documentation。
 - Payload optional failure / blocked / cancelled reason 的實際來源。
 - Deferred inbox migration timing and stable producer `eventId` contract。

@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-23
+updated_at: 2026-06-28
 updated_by: Codex
 ---
 
@@ -16,7 +16,7 @@ In scope：
 
 - Delivery job publisher capability。
 - Post-commit delivery job publish integration in the inbound consumer flow。
-- `webhook.delivery.execute` private job publishing。
+- BullMQ `webhook.delivery.execute` private job publishing。
 - Delivery job payload and deduplication direction。
 - Stale `PENDING` delivery publish recovery。
 - Recovery scheduling / triggering direction。
@@ -43,13 +43,13 @@ webhook inbound event consumer
   -> create webhook_delivery rows in DB transaction
   -> commit DB transaction
   -> call delivery job publisher with created delivery ids
-  -> publish webhook.delivery.execute with delivery id
+  -> publish BullMQ webhook.delivery.execute job with delivery id
   -> publish success: complete inbound message
   -> publish failure: keep delivery PENDING and complete inbound message
 
 recovery cron
   -> find stale PENDING deliveries whose jobs may not have been published
-  -> republish webhook.delivery.execute with delivery id
+  -> republish BullMQ webhook.delivery.execute job with delivery id
   -> leave duplicate job safety to Stage 4 worker lock
 ```
 
@@ -57,9 +57,9 @@ Stage 3 changes the normal path from polling-first publication to immediate post
 
 ## Critical Decisions
 
-- Delivery execution queue 是 Webhook service-private job mechanism，不是 Fund / Webhook 跨 domain event contract。
+- Delivery execution queue 是 Webhook BullMQ service-private job mechanism，不是 Fund / Webhook 跨 domain event contract，也不是 Azure SB event topic。
 - Job payload 只需穩定 delivery identifier；worker 從 persistence 讀取 endpoint 與 payload snapshot。
-- Queue publish 與 DB state 無法視為單一 transaction；publish failure 必須可由 stale `PENDING` recovery 補償。
+- BullMQ publish 與 DB state 無法視為單一 transaction；publish failure 必須可由 stale `PENDING` recovery 補償。
 - Inbound message may be completed after delivery DB commit even if delivery job publish fails, because the delivery record is recoverable。
 - Duplicate execution jobs are allowed only when Stage 4 worker state locking makes them safe。
 - Publisher 不重新 matching subscriptions，也不修改 delivery payload / endpoint snapshot。
@@ -80,7 +80,7 @@ Stage 3 完成時應能證明：
 
 ```text
 newly committed PENDING delivery
-  -> post-commit publisher emits webhook.delivery.execute
+  -> post-commit publisher emits BullMQ webhook.delivery.execute job
   -> job contains delivery identifier
   -> inbound message can be completed
 ```
@@ -113,7 +113,7 @@ post-commit queue publish failure
 
 ## Pattern Gaps
 
-- Fund BullMQ dispatcher / worker 與 scheduler / bootstrap backfill 可作為方向性 baseline，但 post-commit DB-to-queue publication 與 stale pending recovery 仍是新組合，plan 必須明確決定 queued marker、deterministic job id 或 pure pending recovery strategy。
+- Fund BullMQ dispatcher / worker 與 scheduler / bootstrap backfill 可作為方向性 baseline，但 post-commit DB-to-BullMQ publication 與 stale pending recovery 仍是新組合，plan 必須明確決定 queued marker、deterministic job id 或 pure pending recovery strategy。
 
 ## Open Points
 

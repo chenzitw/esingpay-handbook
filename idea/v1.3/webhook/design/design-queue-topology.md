@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-23
+updated_at: 2026-06-29
 updated_by: Codex
 ---
 
@@ -8,99 +8,41 @@ updated_by: Codex
 
 ## Purpose
 
-本文先定義 webhook 第一版會用到的 queue 階段、topic 命名方向與 payload envelope，作為後續 blueprint / plan 討論基礎。
+本文定義 webhook 第一版會用到的 asynchronous surface topology 與 Webhook service-private delivery execution job。Fund -> Webhook broadcast event 的 topic、session、transport envelope 與 application payload 已拆至 [`design-inbound-event-contract.md`](./design-inbound-event-contract.md)。
 
-這不是最終 queue provider 設定，也不定義 consumer group、retry、dead letter、部署資源名稱或實際 TypeScript DTO 檔案位置。那些細節留給 blueprint / plan 依服務實作與 infra convention 定案。
+這不是最終 infra provisioning 設定，也不定義 dead letter、部署資源名稱或實際 TypeScript DTO 檔案位置。那些細節留給 blueprint / plan 依服務實作與 infra convention 定案。
 
 ## Context
 
-交易狀態變更不是由 Fund service 同步呼叫 webhook service。Fund service 在處理交易狀態變更時向 queue 發出 domain event notification；Webhook service 訂閱該 queue，收到事件後直接 matching subscriptions 並建立 `webhook_delivery`。
+交易狀態變更不是由 Fund service 同步呼叫 webhook service。Fund service 在處理交易狀態變更時向 Azure Service Bus Topic 發出 domain event；Webhook service 以自己的 Subscription 消費該 event，收到事件後直接 matching subscriptions 並建立 `webhook_delivery`。
 
-Webhook 第一版不保存 inbound event 的 outbox 或 inbox record。Inbound consumer 建立 delivery 並 commit 後，立即發布 delivery execution job；若 publish 失敗，delivery 保持 `PENDING`，由 recovery cron 補發 job。
+Webhook 第一版不保存 inbound event 的 outbox 或 inbox record。Inbound consumer 建立 delivery 並 commit 後，Stage 3 會立即發布 BullMQ delivery execution job；若 publish 失敗，delivery 保持 `PENDING`，由 recovery cron 補發 job。
 
-因此第一版至少有兩段 queue：
+因此第一版有兩個非同步平面：
 
-- Domain event notification queue：Fund service 發布交易事件狀態變更，webhook service 消費並直接建立 matching deliveries。
-- Webhook delivery execution queue：webhook inbound consumer 的 post-commit publisher 或 recovery scheduler 發布 delivery job，webhook worker 消費並執行 endpoint POST。
+- Domain event broadcast：Azure Service Bus Topic / Subscription。Fund service 發布交易事件，Webhook service 消費並直接建立 matching deliveries；contract 見 [`design-inbound-event-contract.md`](./design-inbound-event-contract.md)。
+- Webhook delivery execution queue：BullMQ service-private job。Webhook inbound consumer 的 post-commit publisher 或 recovery scheduler 發布 delivery job，Webhook worker 消費並執行 endpoint POST。
 
-Queue provider 第一版暫定採 Azure Service Bus。正式 queue/topic 名稱、consumer 設定、dead letter、retry/backoff、資源命名與部署設定留給 plan 依 infra convention 定案。
+Provider 決策：
 
-## Topic Naming
+- Cross-service event broadcast 採 Azure Service Bus Topic / Subscription。
+- Webhook delivery execution queue 保留 BullMQ，屬 Webhook service-private job，不進入 Azure SB event topic 命名規則。
+- Azure SB inbound event subscription 需啟用 session，Webhook consumer 必須使用 session-aware receiver，以 `sessionId` 確保同一 ordering key 內 FIFO。
 
-Topic 命名先採以下概念格式：
-
-```text
-{domain}.{feature}.{action}
-```
-
-命名原則：
-
-- `domain` 表示事件 owner，例如 `fund`。
-- `feature` 表示業務資源或能力，例如 `deposit`、`withdrawal`。
-- `action` 表示此 topic 代表的事件或工作，例如 `status-changed`、`wallet-sync`、`delivery-execute`。
-- Topic 名稱應描述 producer 發出的事實或工作，不應描述 webhook 內部如何處理。
-
-範例：
-
-- `fund.deposit.wallet-sync`
-- `fund.deposit.status-changed`
-- `fund.withdrawal.status-changed`
-- `webhook.delivery.execute`
-
-實際 topic 是否拆成 deposit / withdrawal 各自一條，或 fund transaction 共用一條，留給 blueprint / plan 依 producer 邊界、事件量與 consumer filtering 能力決定。
+正式 BullMQ queue name、consumer 設定、dead letter、資源命名與部署設定留給 plan 依 infra convention 定案。Fund inbound Azure SB topic / subscription naming 見 [`design-inbound-event-contract.md`](./design-inbound-event-contract.md)。
 
 ## Queue Inventory
 
-| Queue stage | Conceptual topic | Producer | Consumer | Purpose |
-| --- | --- | --- | --- | --- |
-| Domain event notification | `fund.deposit.status-changed` 或同級命名 | Fund service | Webhook inbound event consumer | 通知 webhook 某筆 deposit 狀態已變更，可 matching subscriptions 並建立 deliveries。 |
-| Domain event notification | `fund.withdrawal.status-changed` 或同級命名 | Fund service | Webhook inbound event consumer | 通知 webhook 某筆 withdrawal 狀態已變更，可 matching subscriptions 並建立 deliveries。 |
-| Delivery execution | `webhook.delivery.execute` | Webhook inbound consumer post-commit publisher / recovery scheduler | Webhook delivery worker | 要求 worker 執行某一筆 delivery。 |
+| Stage | Transport | Entity / name | Producer | Consumer | Purpose |
+| --- | --- | --- | --- | --- | --- |
+| Domain event broadcast | Azure SB Topic / session-enabled Subscription | `fund.deposit.status-changed / srv-webhook`; `fund.withdrawal-intent.status-changed / srv-webhook` | Fund service | Webhook inbound event consumer | 通知 webhook 某筆交易狀態已變更，可 matching subscriptions 並建立 deliveries。 |
+| Delivery execution | BullMQ private queue | job name `webhook.delivery.execute` | Webhook inbound consumer post-commit publisher / recovery scheduler | Webhook delivery worker | 要求 worker 執行某一筆 delivery。 |
 
-## Domain Event Notification Payload
-
-Domain event notification payload 是 webhook delivery creation 的上游 input。它應提供 webhook 判斷來源、事件類型、業務資源與 payload builder 所需的最小資料。
-
-Conceptual envelope：
-
-```json
-{
-  "source": "fund",
-  "eventKey": "deposit.completed",
-  "resourceType": "deposit",
-  "resourceIdentifier": "67890",
-  "merchantId": "merchantUuid",
-  "occurredAt": "2026-06-10T02:00:00.000Z",
-  "data": {}
-}
-```
-
-欄位語意：
-
-| Field | Meaning |
-| --- | --- |
-| `source` | 事件來源服務或 bounded context；第一版固定為 `fund`。 |
-| `eventKey` | Webhook code-defined event catalog 內的穩定 event key，例如 `deposit.completed`。 |
-| `resourceType` | 來源資源類型，例如 `deposit` 或 `withdrawal`。 |
-| `resourceIdentifier` | 來源資源識別值。 |
-| `merchantId` | 事件所屬商戶。 |
-| `occurredAt` | 交易狀態變更發生時間；若 producer 無精確狀態變更時間，需在 blueprint / plan 決定 fallback。 |
-| `data` | 交易 domain raw。Withdrawal / deposit raw 欄位見 [`design-type-contract.md`](./design-type-contract.md)。 |
-
-Domain event notification rules：
-
-- Webhook consumer 只接受 code-defined event catalog 內的 `eventKey`。
-- `source`、`eventKey`、`resourceType` 與 `resourceIdentifier` 會映射並寫入每一筆 matching `webhook_delivery`。
-- Consumer matching subscriptions 與建立 deliveries 應在同一 DB transaction 內完成；commit 後才 complete inbound queue message。
-- 重送時以 `source + eventKey + resourceType + resourceIdentifier + subscription` 防止重複 delivery。
-- 沒有 matching subscription 時不建立 persistence record，consumer 可直接 complete message。
-- Webhook consumer 建立 delivery 後，不同步呼叫商戶 endpoint。
-- Producer 不應送出 webhook delivery id、signature、retry metadata 或商戶 endpoint 資訊。
-- 第一版不要求 producer 提供穩定 `eventId`；因此同一資源的同一 event key 不支援合法重複發生。
+`webhook.delivery.execute` 不是 Azure SB topic。它若保留，僅作為 BullMQ private job name。
 
 ## Webhook Delivery Execution Payload
 
-Delivery execution payload 是 webhook 內部工作訊息，只需要讓 worker 找到要執行的 delivery。
+Delivery execution payload 是 webhook 內部 BullMQ job payload，只需要讓 worker 找到要執行的 delivery。
 
 Conceptual envelope：
 
@@ -115,14 +57,16 @@ Rules：
 - Worker 收到 `deliveryId` 後，必須從 persistence 讀取 delivery snapshot。
 - Worker 使用 delivery 上保存的 endpoint snapshot 與 `payload`，不重新查 subscription current endpoint 或交易現況。
 - Worker 必須透過 delivery 狀態轉換鎖定任務，避免同一 delivery 被多個 worker 重複處理。
-- Recovery scheduler 可重新發布同一 `deliveryId`，由 worker lock 機制決定是否可執行。
+- Stage 3 recovery scheduler 可為 stale `PENDING` delivery 重新發布同一 `deliveryId`，由 worker lock 機制決定是否可執行。
+- Stage 4 stuck `DELIVERING` recovery 不重新發布 execution job；第一版 stuck execution 會被 guarded transition 標記為 terminal `FAILED`。
 
 ## Inbound Event Flow
 
 ```text
 inbound event consumer
-  -> receive Fund domain event notification
-  -> validate source, event key, resource and payload
+  -> receive Fund domain event from Azure SB session-enabled subscription
+  -> validate envelope, subject and change
+  -> map to webhook source, event key, resource and merchant scope
   -> begin DB transaction
   -> query active, non-deleted subscriptions by merchantId + eventKey
   -> if none: commit and complete inbound message without persistence
@@ -130,7 +74,7 @@ inbound event consumer
        create PENDING webhook_delivery per subscription
        ignore duplicate composite delivery identity safely
        commit DB transaction
-       publish webhook.delivery.execute per new delivery
+       publish BullMQ webhook.delivery.execute job per new delivery
        publish failure: leave delivery PENDING for recovery
        complete inbound message
 ```
@@ -143,7 +87,8 @@ If DB persistence fails, the inbound message must not be completed and remains e
 
 ```text
 inbound event consumer
-  -> validate source, event id, event key, resource and payload
+  -> validate event id, envelope, subject and change
+  -> map to webhook source, event key, resource and merchant scope
   -> begin DB transaction
   -> insert webhook_inbox_event PENDING
        UNIQUE source + event_id
@@ -158,7 +103,7 @@ inbox dispatcher
   -> mark inbox event DISPATCHED
 ```
 
-此 deferred flow 取代 direct-to-delivery 的複合事件去重，並補足 no-subscriber receipt、audit 與 replay。Producer outbox 是否存在不由 Webhook ownership 決定，但 producer 必須在 queue contract 提供穩定 `eventId`。
+此 deferred flow 取代 direct-to-delivery 的複合事件去重，並補足 no-subscriber receipt、audit 與 replay。Producer outbox 是否存在不由 Webhook ownership 決定，但 producer 必須在 event contract 提供穩定 `eventId`。
 
 ## Delivery Publishing Flow
 
@@ -166,13 +111,13 @@ inbox dispatcher
 inbound event consumer
   -> commit newly created webhook_delivery rows
   -> call delivery job publisher with created delivery ids
-  -> publish webhook.delivery.execute per delivery id
+  -> publish BullMQ webhook.delivery.execute job per delivery id
   -> publish success: complete inbound message
   -> publish failure: keep delivery PENDING and complete inbound message
 
 recovery scheduler
   -> find stale PENDING deliveries whose jobs may not have been published
-  -> republish webhook.delivery.execute per delivery id
+  -> republish BullMQ webhook.delivery.execute job per delivery id
 ```
 
 Delivery job publishing is outside the delivery creation DB transaction. The normal path publishes immediately after commit; polling exists only as recovery, not as the primary delivery latency path.
@@ -186,12 +131,14 @@ delivery worker
   -> load payload snapshot and endpoint snapshot
   -> load signing secret
   -> sign payload
-  -> POST endpoint
+  -> POST endpoint with 10 second request timeout
   -> mark SUCCESS on 2xx
   -> mark FAILED on non-2xx / timeout / transport error
 ```
 
 Worker must lock delivery via state transition or equivalent atomic mechanism so the same delivery is not processed concurrently by multiple workers.
+
+First-version delivery execution does not retry. `FAILED` is terminal. HTTP non-2xx response, HTTP request timeout after 10 seconds, and transport error all mark the delivery `FAILED`. The first version does not add `RETRYING`, retry count, next retry time, or delivery attempt fields.
 
 ## Recovery Flow
 
@@ -199,11 +146,11 @@ Worker must lock delivery via state transition or equivalent atomic mechanism so
 recovery scheduler
   -> find stale PENDING delivery whose job may not have been published
   -> find DELIVERING delivery stuck beyond timeout
-  -> reset or reclaim execution eligibility when required
-  -> publish webhook.delivery.execute jobs
+  -> republish BullMQ webhook.delivery.execute jobs only for stale PENDING deliveries
+  -> mark stuck DELIVERING deliveries FAILED with guarded state transition
 ```
 
-First-version recovery only guarantees unpublished pending jobs and stuck execution can be requeued. Retry count, backoff and manual resend are outside the first-version product scope unless Stage 4 plan decides minimal fields are required.
+First-version recovery only guarantees unpublished pending jobs can be requeued and stuck execution can be terminally closed. Retry count, backoff and manual resend are outside the first-version product scope.
 
 ## Failure Boundaries
 
@@ -212,19 +159,20 @@ First-version recovery only guarantees unpublished pending jobs and stuck execut
 - Delivery creation must be atomic for all subscriptions matched during one consumer attempt.
 - Delivery job publish failure after DB commit must not make pending deliveries permanently unprocessable.
 - Delivery worker failure must not lose the delivery record.
-- Queue publish failure compensation must be explicit in Stage 3; stuck execution compensation belongs to Stage 4.
+- BullMQ publish failure compensation must be explicit in Stage 3; stuck execution terminal failure compensation belongs to Stage 4.
 
 ## Flow
 
 ```text
 fund / transaction domain service
-  -> publish domain event notification
-  -> webhook inbound event consumer
-  -> validate source + eventKey + resource
+  -> publish Azure SB domain event topic fund.deposit.status-changed or fund.withdrawal-intent.status-changed with sessionId
+  -> webhook inbound event consumer on srv-webhook subscription
+  -> validate envelope + subject + change
+  -> map to webhook source + eventKey + resource + merchant scope
   -> match subscription by merchantId + eventKey
   -> create webhook_delivery PENDING per subscription
   -> commit delivery rows
-  -> immediately publish webhook.delivery.execute with deliveryId
+  -> immediately publish BullMQ webhook.delivery.execute job with deliveryId
   -> delivery worker locks delivery
   -> POST endpoint
   -> update delivery status
@@ -232,10 +180,6 @@ fund / transaction domain service
 
 ## Open Points
 
-- Fund 端實際 topic 要拆成 `fund.deposit.status-changed` / `fund.withdrawal.status-changed`，或合併為單一 transaction topic。
-- `fund.deposit.wallet-sync` 是否是實際 webhook event 上游，或只是 fund 內部同步事件。
-- Domain event notification payload 的 `data` 是否放完整 domain raw，或只放 resource id 讓 webhook consumer 查詢來源資料。
-- `occurredAt` 的權威來源是交易狀態變更時間、交易 `updatedAt`，還是 producer 發送時間。
 - Delivery execution queue 是否需要額外 job metadata，例如 trace id、publishedAt、source。
-- Azure Service Bus queue/topic naming convention and consumer setting.
 - Delivery publish recovery cadence and publish-state representation, if a queued/published marker is needed.
+- Fund broadcast event 的 topic / subscription naming、payload data strategy 與 `occurredAt` contract 見 [`design-inbound-event-contract.md`](./design-inbound-event-contract.md)。

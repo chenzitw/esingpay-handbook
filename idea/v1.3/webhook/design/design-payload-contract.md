@@ -1,6 +1,6 @@
 ---
 status: draft
-updated_at: 2026-06-23
+updated_at: 2026-06-29
 updated_by: Codex
 ---
 
@@ -10,7 +10,7 @@ updated_by: Codex
 
 本文件鎖定 webhook 第一版送到商戶登記 URL 的 POST payload 格式。所有 webhook delivery 預設使用 HTTP `POST`，外層 envelope 固定，事件內容放在 event-specific `data` 內。
 
-這是第一版 conceptual contract。最終 DTO 型別、序列化細節、簽章 header 與版本化文件留給 plan 或後續 docs。
+這是第一版 conceptual contract。最終 DTO 型別、序列化細節與版本化文件留給 plan 或後續 docs。
 
 ## HTTP Method
 
@@ -154,12 +154,41 @@ Notes：
 
 ## Signing Relationship
 
-簽章演算法與 header 名稱不在本文件定案，但簽章 input 應以實際送出的 JSON body 為準。
+第一版 webhook delivery 使用 HMAC-SHA256 簽章。簽章 secret 由 webhook service runtime 設定提供第一版 global default secret；subscription management 不管理 secret，也不提供商戶自助 rotation。
+
+Request headers：
+
+| Header | Meaning |
+| --- | --- |
+| `X-ESingPay-Timestamp` | Unix timestamp seconds，表示 worker 建立本次 delivery request 的時間。 |
+| `X-ESingPay-Signature` | `sha256=<hex-digest>`，hex digest 使用 lowercase。 |
+| `X-ESingPay-Delivery-Id` | Delivery id，對齊 payload envelope `id`，供 merchant log correlation。 |
+| `X-ESingPay-Event-Key` | Webhook event key，對齊 payload envelope `eventKey`。 |
+
+Signature input：
+
+```text
+<timestamp> + "." + <raw JSON request body bytes interpreted as UTF-8>
+```
+
+Signature output：
+
+```text
+hex(HMAC-SHA256(secret, signature_input))
+```
+
+Merchant verification guidance：
+
+- 以相同 secret、timestamp 與 raw request body bytes 重算 HMAC-SHA256。
+- 使用 constant-time compare 比對 expected signature 與 `X-ESingPay-Signature` 內的 digest。
+- 建議拒絕 timestamp 與接收時間相差超過 5 分鐘的 request，以降低 replay 風險。
+- 若 merchant 無法保存 raw body，需先保存原始 request body bytes 再做 JSON parse；不可 parse 後重新 stringify 來驗簽。
 
 Plan 需避免以下情況：
 
 - 簽章時使用一份 payload，實際 POST 時又重新序列化成不同內容。
 - Worker 發送前重新查交易現況組 payload，造成 delivery payload 與 inbound event 發生時間不一致。
+- 簽章使用 parsed object 或重新 stringify 後的 body；worker 必須序列化一次，並以同一份 raw JSON bytes 完成簽章與 HTTP POST。
 
 ## Stage Relationship
 
@@ -173,4 +202,3 @@ Plan 需避免以下情況：
 - Withdrawal / deposit 對外 id 是否使用 bigint 字串、UUID 或 external id。
 - Failure / blocked reason 是否納入第一版 payload。
 - `merchantReference` 在 withdrawal / deposit 中的實際來源欄位。
-- 是否需要在 envelope 中加入 `attempt` 或 `deliveryAttempt`；第一版若不做 retry count 可先不加。
